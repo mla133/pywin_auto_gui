@@ -12,11 +12,54 @@ def connect_app():
     return Application(backend=BACKEND).start(APP_EXE)
 
 
+#def get_main_window(app):
+#    """Resolve the main window safely."""
+#    win = app.window(title=APP_TITLE)
+#    win.wait("exists enabled visible ready", timeout=10)
+#    return win
+
 def get_main_window(app):
-    """Resolve the main window safely."""
-    win = app.window(title=APP_TITLE)
-    win.wait("exists enabled visible ready", timeout=10)
-    return win
+    """
+    Resolve the correct window dynamically.
+    After opening a file, AccuMate uses a new child/document window
+    whose title contains the filename (.AL4).
+    """
+    import time
+
+    for _ in range(10):  # retry loop
+        windows = app.windows()
+
+        for w in windows:
+            try:
+                title = w.window_text()
+
+                print(f"[DEBUG] Candidate window: '{title}'")
+
+                # Prefer the document window
+                if title and ".AL4" in title:
+                    handle = w.handle
+
+                    win = app.window(handle=handle)
+                    win.wait("exists enabled visible ready", timeout=5)
+                    print(f"[DEBUG] Using document window: '{title}'")
+                    return win
+
+            except Exception:
+                continue
+
+        # fallback attempt (original window)
+        try:
+            win = app.window(title=APP_TITLE)
+            if win.exists():
+                print(f"[DEBUG] Falling back to main window: '{APP_TITLE}'")
+                win.wait("exists enabled visible ready", timeout=5)
+                return win
+        except Exception:
+            pass
+
+        time.sleep(0.5)
+
+    raise RuntimeError("Could not resolve main window")
 
 
 def safe_descendants(win, retries=3, delay=0.2):
