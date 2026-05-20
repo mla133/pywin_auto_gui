@@ -1,10 +1,37 @@
 from controls.common_controls import get_list, get_tree, get_list_row_texts
 from pywinauto.keyboard import send_keys
 import time
+from datetime import datetime
+import os
 
 class MainPage:
-    def __init__(self, app):
+    def __init__(self, app, request=None):
         self.app = app
+        self.request = getattr(request, "request", None)  # Support both direct and fixture injection
+
+    def screenshot(self, label):
+        try:
+            win = self.app.app.top_window()
+
+            os.makedirs("screenshots", exist_ok=True)
+            test_name = (
+                    self.request.node.nodeid.replace("::", "_").replace("/", "_").replace("\\", "_")
+                    if self.request else "unknown_test"
+                    )
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{test_name}_{label}_{timestamp}.png"
+            path = f"screenshots/{filename}"
+
+            img = win.capture_as_image()
+
+            if img:
+                img.save(path)
+                print(f"[INFO] Screenshot saved: {path}")
+            else:
+                print("[WARN] Screenshot capture returned None")
+
+        except Exception as e:
+            print(f"[ERROR] Exception during screenshot: {e}")
 
     def select_tree_path(self, path):
         tree = get_tree(self.app)

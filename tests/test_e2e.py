@@ -4,20 +4,24 @@ from workflows.security_workflows import enter_passcode
 from pages.main_page import MainPage
 
 
-def test_full_user_workflow(app):
+def test_full_user_workflow(app, request):
 
     print("[STEP] Loading test file")
     load_test_file(app)
-    page = MainPage(app)
+    page = MainPage(app, request=request)
+    page.screenshot("after_load_test_file")
 
     print("[STEP] Navigating to Security Directory")
     page.select_tree_path(["System Directory", "Security Directory"])
+    page.screenshot("after_select_tree_path")
 
     print("[STEP] Selecting Ethernet Host Security Level")
     row_index = page.select_list_item("Ethernet Host Security Level")
+    page.screenshot("after_select_list_item")
 
     print("[STEP] Editing dropdown value")
     page.edit_dropdown_value("Ethernet Host Security Level", "Security Level 2")
+    page.screenshot("after_edit_dropdown_value")
 
     print("[STEP] Handling passcode dialog (bad passcode)")
     success = enter_passcode(app, "1234")

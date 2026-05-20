@@ -8,6 +8,7 @@ from app.application import AccuMateApp
 @pytest.fixture(scope="function")
 def app(request):
     app_instance = AccuMateApp()
+    app_instance.request = request
 
     yield app_instance
 
