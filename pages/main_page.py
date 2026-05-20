@@ -4,10 +4,54 @@ import time
 from datetime import datetime
 import os
 
+def auto_step(func):
+    def wrapper(self, *args, **kwargs):
+        result = func(self, *args, **kwargs)
+        step_name = func.__name__
+        self._auto_screenshot(step_name)
+
+        return result
+
+    return wrapper
+
+
 class MainPage:
     def __init__(self, app, request=None):
         self.app = app
-        self.request = getattr(request, "request", None)  # Support both direct and fixture injection
+        self.test_name = getattr(app, "test_name", "unknown_test")
+        self._step_counter = 0
+
+        print(f"[DEBUG] Page created, has request: {hasattr(app, 'request')}")
+
+    def _auto_screenshot(self, step_name):
+        try:
+            time.sleep(0.3)
+
+            win = self.app.app.top_window()
+
+            base_dir = "screenshots"
+            os.makedirs(base_dir, exist_ok=True)
+
+            # group by test
+            test_dir = os.path.join(base_dir, self.test_name)
+            os.makedirs(test_dir, exist_ok=True)
+
+            # increment step counter
+            self._step_counter += 1
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{self._step_counter:02d}_{step_name}_{timestamp}.png"
+
+            path = os.path.join(test_dir, filename)
+
+            img = win.capture_as_image()
+
+            if img:
+                img.save(path)
+                print(f"[INFO] Auto-screenshot saved: {path}")
+
+        except Exception as e:
+            print(f"[ERROR] Exception during auto-screenshot: {e}")
 
     def screenshot(self, label):
         try:
@@ -33,6 +77,7 @@ class MainPage:
         except Exception as e:
             print(f"[ERROR] Exception during screenshot: {e}")
 
+    @auto_step
     def select_tree_path(self, path):
         tree = get_tree(self.app)
 
@@ -66,6 +111,7 @@ class MainPage:
 
         return current
 
+    @auto_step
     def select_list_item(self, target_text):
         lst = get_list(self.app)
 
@@ -82,6 +128,7 @@ class MainPage:
         raise RuntimeError(f"Item with text '{target_text}' not found")
 
 
+    @auto_step
     def edit_value(self, target_text, new_value):
         lst = get_list(self.app)
 
@@ -130,6 +177,7 @@ class MainPage:
 
         return row_index
 
+    @auto_step
     def get_value(self, target_text):
         lst = get_list(self.app)
         for i in range(lst.item_count()):
@@ -143,6 +191,7 @@ class MainPage:
 
 
 
+    @auto_step
     def edit_dropdown_value(self, target_text, target_option):
         lst = get_list(self.app)
 
