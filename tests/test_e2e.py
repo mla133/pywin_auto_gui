@@ -3,8 +3,7 @@ from workflows.file_workflows import load_test_file
 from pages.main_page import MainPage
 
 
-def test_full_user_workflow():
-    app = AccuMateApp()
+def test_full_user_workflow(app):
     load_test_file(app)
     page = MainPage(app)
     page.select_tree_path(["System Directory", "Security Directory"])

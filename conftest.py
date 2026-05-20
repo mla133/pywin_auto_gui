@@ -1,16 +1,46 @@
 import pytest
+import subprocess
+import os
+from datetime import datetime
 from app.application import AccuMateApp
+
 
 @pytest.fixture(scope="function")
 def app():
-    """Fixture to create an instance of the AccuMateApp for testing."""
-
     app_instance = AccuMateApp()
+
     yield app_instance
 
-    # Add any necessary cleanup code here if needed
+    print("[DEBUG] Taking screenshot before teardown...")
+
     try:
-        app_instance.app.kill()
-        
-    except Exception:
-        pass
+        win = app_instance.get_window()
+
+        # Generate a timestamped filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = f"screenshots/test_{timestamp}.png"
+
+        # Ensure folder exists
+        os.makedirs("screenshots", exist_ok=True)
+
+        # Capture screenshot
+        win.capture_as_image().save(screenshot_path)
+
+        print(f"[DEBUG] Screenshot saved: {screenshot_path}")
+
+    except Exception as e:
+        print(f"[WARN] Screenshot failed: {e}")
+
+    print("[DEBUG] Closing application...")
+
+    try:
+        pid = app_instance.get_window().process_id()
+
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/F", "/T"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+    except Exception as e:
+        print(f"[WARN] Failed to kill process: {e}")
