@@ -1,7 +1,16 @@
 import pytest
-from utils import connect_app, get_main_window, wait_for_ui_ready
-from utils import open_file_workflow
+from app.application import AccuMateApp
 
 @pytest.fixture(scope="function")
 def app():
-    return connect_app()
+    """Fixture to create an instance of the AccuMateApp for testing."""
+
+    app_instance = AccuMateApp()
+    yield app_instance
+
+    # Add any necessary cleanup code here if needed
+    try:
+        app_instance.app.kill()
+        
+    except Exception:
+        pass
