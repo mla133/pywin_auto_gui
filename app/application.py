@@ -20,9 +20,9 @@ class AccuMateApp:
             for w in windows:
                 try:
                     title = w.window_text()
-                    print(f"[DEBUG] Candidate window: '{title}'")
 
                     if title and ".AL4" in title and "AccuMate" in title:
+                        print(f"[DEBUG] Candidate window: '{title}'")
                         handle = w.handle
                         win = self.app.window(handle=handle)
                         win.wait("exists enabled visible ready", timeout=5)

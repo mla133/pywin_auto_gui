@@ -11,7 +11,7 @@ def app():
 
     yield app_instance
 
-    print("[DEBUG] Taking screenshot before teardown...")
+    print("\n[DEBUG] Taking screenshot before teardown...")
 
     try:
         win = app_instance.get_window()
