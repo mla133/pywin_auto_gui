@@ -19,23 +19,6 @@ def select_first_list_item(app):
     lst.select(0)
     return lst
 
-#def select_list_item_by_text(app, target_text):
-#    lst = get_list(app)
-#
-#    item_count = lst.item_count()
-#
-#    for i in range(item_count):
-#        item = lst.get_item(i)
-#        texts = item.texts()
-#
-#        print(f"[DEBUG] Row {i}: {texts}")
-#
-#        if any(target_text in t for t in texts):
-#            print(f"[INFO] Match found at row {i}")
-#            lst.select(i)
-#            return lst
-#
-#    raise RuntimeError(f"Item with text '{target_text}' not found in the list.")
 
 def select_list_item_by_text(app, target_text):
     lst = get_list(app)
@@ -58,7 +41,7 @@ def select_list_item_by_text(app, target_text):
 
         if any(target_text in t for t in row_texts):
             print(f"[INFO] Match found at row {i}")
-            lst.select(i)
+            lst.get_item(i).select()
             return lst
 
     raise RuntimeError(f"Item with text '{target_text}' not found in the list.")
