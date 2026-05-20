@@ -6,7 +6,7 @@ from app.application import AccuMateApp
 
 
 @pytest.fixture(scope="function")
-def app():
+def app(request):
     app_instance = AccuMateApp()
 
     yield app_instance
@@ -17,16 +17,18 @@ def app():
         win = app_instance.get_window()
 
         # Generate a timestamped filename
+        test_name = request.node.name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        screenshot_path = f"screenshots/test_{timestamp}.png"
+        filename = f"{test_name}_{timestamp}.png"
+        path = f"screenshots/{filename}"
 
         # Ensure folder exists
         os.makedirs("screenshots", exist_ok=True)
 
         # Capture screenshot
-        win.capture_as_image().save(screenshot_path)
+        win.capture_as_image().save(path)
 
-        print(f"[DEBUG] Screenshot saved: {screenshot_path}")
+        print(f"[DEBUG] Screenshot saved: {path}")
 
     except Exception as e:
         print(f"[WARN] Screenshot failed: {e}")
