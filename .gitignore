@@ -216,5 +216,8 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Session logs (local artifacts, not part of the repo history)
+session/
+
 # Streamlit
 .streamlit/secrets.toml
