@@ -156,6 +156,33 @@ No linter or build step is configured for this project.
   (`automation_id="1001"`) and clicks Save (`automation_id="1"`) using the same dual-backend
   win32+UIA dialog pattern as `open_file_dialog`, then handles the overwrite-confirmation loop.
 
+## Markdown scenario runner (plain-English test scripts)
+
+- **`scenario_runner.py`** (repo root) is a standalone script — *not* a pytest test — that reads a
+  plain-English Markdown file and executes it step-by-step against a real running AccuMate instance,
+  reusing the same `workflows/`/`pages.MainPage` functions the pytest suite is built on:
+  ```bash
+  python scenario_runner.py scenarios/example_connect_and_save.md
+  ```
+- **Markdown format**: any bullet (`- `/`* `), numbered (`1. `), or plain paragraph line is treated as
+  one ordered step; headers (`#`) and fenced code blocks are ignored, so a scenario file can carry
+  human-readable titles/narration alongside the actual steps (see `parse_scenario_markdown`).
+- **Step recognition is a small, literal regex-to-handler registry** (`_STEP_PATTERNS` in
+  `scenario_runner.py`, registered via the `@step(pattern)` decorator), not a general NLP parser —
+  e.g. `"Connect to 10.55.66.70"` → `configure_ip_and_connect`, `"Save as <path>"` → `save_as`,
+  `"Verify that the device is connected"` → asserts `wait_for_device_connection()`. Unrecognized
+  steps are reported and skipped (not guessed at), so a typo fails loudly rather than silently doing
+  the wrong thing. A broad `"click ... [button]"` pattern is registered last as a catch-all for any
+  named ribbon button not covered by a more specific pattern.
+- **Runner does its own app lifecycle**: launches `AccuMateApp()`, runs steps in order (stopping at
+  the first real failure — later steps likely depend on it), then always takes a teardown screenshot
+  and force-kills the process, mirroring the pattern in the root `conftest.py`'s `app` fixture.
+- **Example scenarios** live in `scenarios/` (e.g. `example_connect_and_save.md`,
+  `example_load_test_file.md`) as both usage samples and manual smoke-test scripts.
+- **`tests/test_scenario_runner.py`** covers the parsing/regex-matching logic in isolation (no real
+  app launched, so it's collected by default) — covers Markdown extraction edge cases (headers, code
+  fences, bullet styles) and verifies each recognized step phrasing maps to the correct handler.
+
 ## Key conventions
 
 - **Dual-backend dialog handling**: modal dialogs (`class_name="#32770"`) are attached via the
