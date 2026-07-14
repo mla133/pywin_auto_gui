@@ -161,7 +161,39 @@ def test_match_testcase_step_does_not_false_positive_on_change_to_prose():
     sections = tcr.parse_test_case_document(ALIV_3929_PATH)
     dump_section = next(s for s in sections if s.title == "Testing Dump Selected/Dump All functionality")
     compound_step = dump_section.steps[3]  # step 4
-
     handler, m = tcr.match_testcase_step(compound_step.text, base_dir=".")
 
     assert handler is None
+
+
+def test_load_test_configuration_file_handler_has_verifier():
+    # The "Load test configuration file" step's Expected Result ("The test
+    # configuration file will load successfully") is now genuinely checked
+    # (main window title reflects the loaded file) rather than just assumed
+    # from the handler not raising - see _STEP_VERIFIERS.
+    handler, m = tcr.match_testcase_step('Load test configuration file "ALIV-3929.AL4" file.', base_dir=".")
+
+    assert handler is not None
+    assert callable(getattr(handler, "verifier", None))
+
+
+def test_start_application_handler_has_no_verifier():
+    # "Start the Accumate Application" has no automated way to confirm "a
+    # blank view" beyond the window existing (already implied by the
+    # handler not raising) - no verifier is registered, so the caller keeps
+    # the default "ran without raising -> PASS" behavior.
+    handler, m = tcr.match_testcase_step("Start the Accumate Application.", base_dir=".")
+
+    assert handler is not None
+    assert getattr(handler, "verifier", None) is None
+
+
+def test_connect_to_ip_handler_has_verifier():
+    # scenario_runner's "connect to <ip>" is in the safe-handler allowlist;
+    # its expected outcome (a live device connection) is independently
+    # re-checked via AccuMateApp.is_device_connected() rather than assumed.
+    handler, m = tcr.match_testcase_step("Connect to 10.55.66.70", base_dir=".")
+
+    assert handler is not None
+    assert callable(getattr(handler, "verifier", None))
+

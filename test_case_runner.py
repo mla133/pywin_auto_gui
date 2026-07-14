@@ -45,6 +45,7 @@ import argparse
 import os
 import re
 import sys
+import time
 from datetime import datetime
 
 import scenario_runner as sr
@@ -253,27 +254,116 @@ _SAFE_STEP_HANDLERS = {
 }
 
 
+# --- Automated post-execution verification ---------------------------------
+#
+# Historically, an AUTO step's verdict was just "did the handler raise an
+# exception?" - which confirms the *action* ran, but not that the app
+# actually reached the state the step's Expected Result claims. Where we can
+# check that safely and unambiguously using existing app/page primitives
+# (not by guessing at arbitrary prose), we do - each matched handler above
+# may have an associated verifier here that re-checks real app state after
+# the handler runs and turns that into the recorded PASS/FAIL, instead of
+# just assuming success. Steps whose expected result can't be safely
+# verified this way keep the previous "ran without raising -> PASS"
+# behavior; steps with no matching *action* handler at all still always
+# fall back to a manual prompt (see match_testcase_step) - we only verify
+# the aftermath of something we ourselves already executed.
+def _verify_window_title_contains(app, expected_substring, timeout=25):
+    """
+    AccuMate's main frame title becomes "<filename> - AccuMate for
+    AccuLoad" once a document is open (see app/application.py's _TITLE_RE
+    comment). Checking for the loaded file's base name in the title
+    confirms a file genuinely loaded, as opposed to load_config_file()
+    merely not raising (e.g. the Open dialog silently failing to commit).
+
+    Polls for up to `timeout` seconds. The title update lags well behind
+    the Open dialog closing: live testing showed AccuMate spends ~10-13s
+    attempting a device connection (using the newly-loaded config's
+    comm settings) before it finishes loading the document and updates the
+    title - a naive immediate/short-poll check reads the *previous* title
+    during that window and reports a false failure.
+    """
+    start = time.time()
+    title = ""
+
+    while time.time() - start < timeout:
+        win = app.get_window()
+        title = win.window_text()
+        if expected_substring.lower() in title.lower():
+            return True, f"window title: {title!r}"
+        time.sleep(0.5)
+
+    return False, f"window title: {title!r}"
+
+
+
+def _verify_config_file_loaded(app, page, m, base_dir):
+    config_path = _resolve_config_path(m.group(1), base_dir)
+    expected_name = os.path.splitext(os.path.basename(config_path))[0]
+    return _verify_window_title_contains(app, expected_name)
+
+
+def _verify_sr_test_file_loaded(app, page, m, base_dir):
+    expected_name = os.path.splitext(os.path.basename(sr.TEST_FILE))[0]
+    return _verify_window_title_contains(app, expected_name)
+
+
+def _verify_sr_config_file_loaded(app, page, m, base_dir):
+    expected_name = os.path.splitext(os.path.basename(m.group(1)))[0]
+    return _verify_window_title_contains(app, expected_name)
+
+
+def _verify_connected(app, page, m, base_dir):
+    connected = app.is_device_connected()
+    return connected, ("device reports connected" if connected else "device reports NOT connected")
+
+
+# Keyed by the _TESTCASE_STEP_PATTERNS handler function.
+_STEP_VERIFIERS = {
+    _tc_load_test_configuration_file: _verify_config_file_loaded,
+}
+
+# Keyed by the scenario_runner handler function (subset of _SAFE_STEP_HANDLERS).
+_SR_STEP_VERIFIERS = {
+    sr._step_load_test_file: _verify_sr_test_file_loaded,
+    sr._step_load_config_file: _verify_sr_config_file_loaded,
+    sr._step_connect_to_ip: _verify_connected,
+}
+
+
 def match_testcase_step(step_text, base_dir):
     """
     Try to match a whole step's text against the curated fully-automatable
     patterns, falling back to the allowlisted subset of scenario_runner's
     general step grammar (see _SAFE_STEP_HANDLERS). Returns (handler, args)
     where handler(app, page, *args) executes the step, or (None, None) if
-    nothing matched (-> manual step).
+    nothing matched (-> manual step). If a verifier is registered for the
+    matched pattern (see _STEP_VERIFIERS/_SR_STEP_VERIFIERS), it's attached
+    as `handler.verifier(app, page) -> (bool_ok, detail_str)` for the caller
+    to use instead of assuming success merely because the handler didn't
+    raise.
     """
     stripped = step_text.strip()
 
     for pattern, handler in _TESTCASE_STEP_PATTERNS:
         m = pattern.match(stripped)
         if m:
-            return (lambda app, page, m=m, handler=handler: handler(app, page, m, base_dir)), m
+            exec_fn = lambda app, page, m=m, handler=handler: handler(app, page, m, base_dir)
+            verifier = _STEP_VERIFIERS.get(handler)
+            if verifier is not None:
+                exec_fn.verifier = lambda app, page, m=m, verifier=verifier: verifier(app, page, m, base_dir)
+            return exec_fn, m
 
     for pattern, handler in sr._STEP_PATTERNS:
         if handler not in _SAFE_STEP_HANDLERS:
             continue
         m = pattern.match(stripped)
         if m:
-            return (lambda app, page, m=m, handler=handler: handler(app, page, m)), m
+            exec_fn = lambda app, page, m=m, handler=handler: handler(app, page, m)
+            verifier = _SR_STEP_VERIFIERS.get(handler)
+            if verifier is not None:
+                exec_fn.verifier = lambda app, page, m=m, verifier=verifier: verifier(app, page, m, base_dir)
+            return exec_fn, m
 
     return None, None
 
@@ -324,8 +414,20 @@ def run_test_case(markdown_path, report_path=None):
                 if handler is not None:
                     try:
                         handler(app, page)
-                        print("  [AUTO] executed successfully")
-                        results.append((section.title, tc_step, "AUTO", "PASS", None))
+                        verifier = getattr(handler, "verifier", None)
+
+                        if verifier is not None:
+                            try:
+                                ok, detail = verifier(app, page)
+                            except Exception as e:
+                                ok, detail = False, f"verification error: {e}"
+
+                            verdict = "PASS" if ok else "FAIL"
+                            print(f"  [AUTO] executed; verification {verdict} ({detail})")
+                            results.append((section.title, tc_step, "AUTO", verdict, f"auto-verified: {detail}"))
+                        else:
+                            print("  [AUTO] executed successfully")
+                            results.append((section.title, tc_step, "AUTO", "PASS", None))
                     except Exception as e:
                         print(f"  [AUTO] FAILED: {e}")
                         results.append((section.title, tc_step, "AUTO", "FAIL", str(e)))

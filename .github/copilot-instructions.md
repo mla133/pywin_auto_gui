@@ -219,9 +219,33 @@ No linter or build step is configured for this project.
   already includes a directory is used as-is.
 - Results are collected per step (`AUTO`/`MANUAL`, verdict, notes) and written to a Markdown report
   (default `<input-name>-report.md` next to the input file, or `--report <path>`).
+- **Automated post-execution verification (no human input) for the steps we ourselves execute**: an
+  `AUTO` step's verdict used to just mean "the handler didn't raise an exception" - which confirms the
+  *action* ran, but not that AccuMate actually reached the state the step's Expected Result claims.
+  Where a matched handler's outcome can be checked safely and unambiguously via existing `app`/`page`
+  primitives, a **verifier** function (`_STEP_VERIFIERS`/`_SR_STEP_VERIFIERS`, keyed by handler) is
+  attached to it and re-checks real app state after the handler returns, turning *that* into the
+  recorded `PASS`/`FAIL` instead of assuming success:
+  - "Load test configuration file ..." -> polls the main window's title bar (up to 25s) for the
+    loaded file's base name (`_verify_window_title_contains`/`_verify_config_file_loaded`). Live
+    testing showed this needs a real poll, not an immediate check: AccuMate spends ~10-13s attempting
+    a device connection using the newly-loaded config's comm settings *before* it finishes loading the
+    document and updates the title - checking too early or with too short a timeout reads the
+    *previous* title and reports a false failure (caught and fixed during this work).
+  - `scenario_runner`'s `"connect to <ip>"` (in the safe-handler allowlist) -> re-checks
+    `AccuMateApp.is_device_connected()` independently of `configure_ip_and_connect`'s own internal
+    check.
+  - Steps with **no verifier registered** (e.g. `"Start the Accumate Application"` - "opens to a blank
+    view" has no automated way to confirm beyond the window merely existing) keep the previous
+    "ran without raising -> PASS" behavior; this is a deliberate, documented gap, not a silent one.
+  - Steps with **no matching action handler at all** are never auto-verified — we only verify the
+    aftermath of something we ourselves executed, never a claim about a step nobody automated (e.g. a
+    step describing a manual UI click isn't auto-verified just because its Expected Result happens to
+    mention checkable state - the action that would produce that state never actually ran).
 - `tests/test_test_case_runner.py` parses the real `scenarios/ALIV-3929.md` fixture directly (no live
   app) to validate section/step/expected-result extraction and whole-step pattern matching, including a
-  regression test for the click-catch-all false positive above.
+  regression test for the click-catch-all false positive above, plus tests asserting which handlers do
+  and don't carry a verifier.
 
 ## Markdown scenario runner (plain-English test scripts)
 
