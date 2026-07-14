@@ -23,7 +23,7 @@ def _write_markdown(tmp_path, content):
 def test_parse_scenario_markdown_extracts_bullet_items(tmp_path):
     content = """# Title
 
-Some narration paragraph, not a step marker but still a step.
+Some narration paragraph explaining the scenario - not a step.
 
 - First bullet step
 * Second bullet step (asterisk style)
@@ -34,7 +34,6 @@ Some narration paragraph, not a step marker but still a step.
     steps = sr.parse_scenario_markdown(path)
 
     assert steps == [
-        "Some narration paragraph, not a step marker but still a step.",
         "First bullet step",
         "Second bullet step (asterisk style)",
         "First numbered step",
@@ -61,12 +60,15 @@ this looks like a step but is inside a code fence
     assert steps == ["Load the test file", "Wait 1 seconds"]
 
 
-def test_parse_scenario_markdown_empty_file_returns_no_steps(tmp_path):
-    content = "# Just a title\n\nNo actionable content here... wait, this counts as a step.\n"
+def test_parse_scenario_markdown_ignores_plain_paragraph_narration(tmp_path):
+    content = (
+        "# Just a title\n\n"
+        "This paragraph explains why the scenario exists, but is not a step.\n"
+    )
     path = _write_markdown(tmp_path, content)
     steps = sr.parse_scenario_markdown(path)
 
-    assert steps == ["No actionable content here... wait, this counts as a step."]
+    assert steps == []
 
 
 @pytest.mark.parametrize(

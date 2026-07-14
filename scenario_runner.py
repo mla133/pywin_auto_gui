@@ -9,11 +9,10 @@ test2.al4") be re-run automatically without writing a new pytest test.
 Usage:
     python scenario_runner.py scenarios/example_connect_and_save.md
 
-Markdown format: any bullet ("- "/"* "), numbered ("1. ") list item, or
-plain paragraph line is treated as one ordered step. Headers (#, ##, ...),
-blank lines, and fenced code blocks (```...```) are ignored, so a scenario
-file can carry human-readable titles/narration around the actual steps.
-See scenarios/ for worked examples.
+Markdown format: any bullet ("- "/"* "), numbered ("1. ") list item is
+treated as one ordered step; everything else (headers, blank lines, fenced
+code blocks, and plain paragraph text) is narration and ignored. See
+scenarios/ for worked examples.
 
 Recognized step phrasing is intentionally small and literal (see
 _STEP_PATTERNS below) rather than a full NLP parser - each pattern is a
@@ -41,9 +40,11 @@ _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.*\S)\s*$")
 def parse_scenario_markdown(path):
     """
     Extract an ordered list of plain-English step strings from a Markdown
-    file. Headers (#...), blank lines, and fenced code blocks are ignored;
-    both bullet/numbered list items and plain paragraph lines count as
-    steps, in file order.
+    file. Only bullet ("- "/"* ") and numbered ("1. "/"1)") list items count
+    as steps, in file order. Everything else - headers (#...), blank lines,
+    fenced code blocks, and plain paragraph text - is treated as narration
+    and ignored, so a scenario file can freely explain *why* it does
+    something in prose without that prose being mistaken for a step.
     """
     steps = []
     in_code_block = False
@@ -60,11 +61,10 @@ def parse_scenario_markdown(path):
                 continue
             if not stripped:
                 continue
-            if stripped.startswith("#"):
-                continue
 
             match = _LIST_ITEM_RE.match(line)
-            steps.append(match.group(1) if match else stripped)
+            if match:
+                steps.append(match.group(1))
 
     return steps
 

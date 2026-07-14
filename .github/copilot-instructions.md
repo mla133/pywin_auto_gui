@@ -164,9 +164,10 @@ No linter or build step is configured for this project.
   ```bash
   python scenario_runner.py scenarios/example_connect_and_save.md
   ```
-- **Markdown format**: any bullet (`- `/`* `), numbered (`1. `), or plain paragraph line is treated as
-  one ordered step; headers (`#`) and fenced code blocks are ignored, so a scenario file can carry
-  human-readable titles/narration alongside the actual steps (see `parse_scenario_markdown`).
+- **Markdown format**: only bullet (`- `/`* `) or numbered (`1. `) list items are treated as steps, in
+  file order; headers, blank lines, fenced code blocks, and plain paragraph text are narration and are
+  ignored (see `parse_scenario_markdown`) — this was corrected after a real test run showed prose
+  narration lines being misread as unrecognized steps and failing the scenario.
 - **Step recognition is a small, literal regex-to-handler registry** (`_STEP_PATTERNS` in
   `scenario_runner.py`, registered via the `@step(pattern)` decorator), not a general NLP parser —
   e.g. `"Connect to 10.55.66.70"` → `configure_ip_and_connect`, `"Save as <path>"` → `save_as`,
