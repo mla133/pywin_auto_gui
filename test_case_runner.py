@@ -186,6 +186,30 @@ def _testcase_step(pattern):
     return register
 
 
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+_CONFIGS_DIR = os.path.join(_REPO_ROOT, "configs")
+
+
+def _resolve_config_path(filename, base_dir):
+    """
+    Resolve a bare config filename (no directory) referenced by a test-case
+    step, e.g. "ALIV-3929.AL4", against the repo's configs/ directory (where
+    saved AccuMate config files referenced by these formal test-case
+    documents are expected to live - see configs/ALIV-3929.AL4), falling
+    back to the scenario Markdown file's own directory for backward
+    compatibility. A filename that already includes a directory is used
+    as-is unchanged.
+    """
+    if os.path.dirname(filename):
+        return filename
+
+    configs_candidate = os.path.join(_CONFIGS_DIR, filename)
+    if os.path.isfile(configs_candidate):
+        return configs_candidate
+
+    return os.path.join(base_dir, filename)
+
+
 @_testcase_step(r"^start (?:the )?accumate application\.?$")
 def _tc_start_app(app, page, m, base_dir):
     # AccuMateApp is already launched by run_test_case() before any steps
@@ -195,8 +219,7 @@ def _tc_start_app(app, page, m, base_dir):
 
 @_testcase_step(r"^load test configuration file ['\"]?(.+?)['\"]?(?: file)?\.?$")
 def _tc_load_test_configuration_file(app, page, m, base_dir):
-    filename = m.group(1)
-    config_path = filename if os.path.dirname(filename) else os.path.join(base_dir, filename)
+    config_path = _resolve_config_path(m.group(1), base_dir)
     load_config_file(app, config_path)
 
 

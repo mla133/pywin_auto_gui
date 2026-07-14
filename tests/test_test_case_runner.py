@@ -95,6 +95,26 @@ def test_match_testcase_step_recognizes_load_test_configuration_file():
     assert m.group(1) == "ALIV-3929.AL4"
 
 
+def test_resolve_config_path_prefers_configs_directory_when_file_exists():
+    # configs/ALIV-3929.AL4 is a real fixture committed for this test case.
+    resolved = tcr._resolve_config_path("ALIV-3929.AL4", base_dir="/some/scenarios/dir")
+
+    assert resolved == os.path.join(tcr._CONFIGS_DIR, "ALIV-3929.AL4")
+    assert os.path.isfile(resolved)
+
+
+def test_resolve_config_path_falls_back_to_base_dir_when_not_in_configs():
+    resolved = tcr._resolve_config_path("DoesNotExistAnywhere.AL4", base_dir="/some/scenarios/dir")
+
+    assert resolved == os.path.join("/some/scenarios/dir", "DoesNotExistAnywhere.AL4")
+
+
+def test_resolve_config_path_leaves_explicit_directory_untouched():
+    resolved = tcr._resolve_config_path(r"C:\explicit\path\Foo.AL4", base_dir="/some/scenarios/dir")
+
+    assert resolved == r"C:\explicit\path\Foo.AL4"
+
+
 def test_match_testcase_step_falls_back_to_scenario_runner_grammar():
     # "Wait N seconds" is only defined in scenario_runner's general grammar,
     # not in test_case_runner's curated patterns - confirms the fallback works.

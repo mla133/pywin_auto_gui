@@ -192,6 +192,11 @@ No linter or build step is configured for this project.
 - **Passcodes are always manual, on purpose** — real per-site security passcodes referenced abstractly
   in these documents ("the passcode for security level 3") have no business living in a Markdown file
   or this repo, so passcode-entry steps always pause rather than sourcing a value automatically.
+- **Bare config filenames resolve against the repo's `configs/` directory first** (`_resolve_config_path`)
+  — e.g. `"Load test configuration file 'ALIV-3929.AL4' file"` resolves to `configs/ALIV-3929.AL4`, which
+  is where saved AccuMate config files referenced by formal test-case documents are expected to live,
+  falling back to the scenario Markdown file's own directory for backward compatibility. A filename that
+  already includes a directory is used as-is.
 - Results are collected per step (`AUTO`/`MANUAL`, verdict, notes) and written to a Markdown report
   (default `<input-name>-report.md` next to the input file, or `--report <path>`).
 - `tests/test_test_case_runner.py` parses the real `scenarios/ALIV-3929.md` fixture directly (no live
