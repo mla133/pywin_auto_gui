@@ -1,0 +1,157 @@
+# pywin_auto_gui — Copilot Instructions
+
+UI automation test framework for a specific Win32/MFC desktop app ("AccuMate for AccuLoad")
+using `pywinauto` + `pytest`. Tests drive the real application binary — there is no mocking
+layer, so tests require the target app to be installed at the path in `app/application.py`.
+
+## Running tests
+
+```bash
+pytest -s -v
+```
+
+- `pytest.ini` sets `testpaths = tests` and `python_files = test_*.py` — only files matching
+  `test_*.py` under `tests/` are collected by default. `tests/unit_test_ribbon_controls.py` and
+  `tests/unit_test_uia_inspection.py` do **not** match this pattern (see dedicated section below)
+  and must be run by explicit path.
+- Run a single test: `pytest -s -v tests/test_e2e.py::test_full_user_workflow`
+- `-s` is required in practice to see the extensive `[DEBUG]`/`[INFO]`/`[STEP]` print output used
+  for diagnosing UI automation failures.
+- `tests/test_e2e.py::test_full_user_workflow` launches the app and loads the test file, then calls
+  `AccuMateApp.wait_for_device_connection()` to check for a real live connection (see
+  `is_device_connected()` below — **not** tree/list presence). If not connected within
+  `DEVICE_CONNECT_TIMEOUT` (10s), the test calls `pytest.skip()` automatically instead of failing.
+  No manual configuration/env var is needed by default. Pass `--accumate-config-file` explicitly to
+  additionally have it load a saved config and configure+connect to `--accumate-device-ip` first
+  (see below) before running the workflow steps.
+- `tests/test_device_connectivity.py::test_device_connectivity` is a dedicated, marked
+  (`@pytest.mark.requires_device`) connectivity check: it loads a saved AccuMate config file,
+  configures the device IP via `workflows/comm_workflows.configure_ip_and_connect` (opens the
+  Communications Settings dialog, sets the IP, clicks "Retry Comm"), and asserts a live connection
+  is established:
+  ```bash
+  pytest -s -v tests/test_device_connectivity.py --accumate-config-file="C:\path\to\DefaultAL4.dat" --accumate-device-ip=10.55.66.70
+  ```
+  Both options have working defaults (`conftest.py`'s `config_file`/`device_ip` fixtures fall back
+  to the app's own `DefaultAL4.dat` and a known test device `10.55.66.70`, respectively), so running
+  it with no flags still attempts a real connection whenever that default config file exists on
+  disk. Skips (rather than fails) if no config file is available at all, or if the device doesn't
+  come online within the timeout.
+  - Filter these out of a run with `pytest -m "not requires_device"` if no device is available.
+
+### Ribbon controls, UIA inspection, and debug_tools
+
+- Ribbon smoke test: `pytest -s -v tests/unit_test_ribbon_controls.py`
+  - Run a single parametrized case: `pytest -s -v "tests/unit_test_ribbon_controls.py::test_click_ribbon_button[Retry Comm]"`
+  - Uses the `page` fixture defined in `tests/conftest.py` (a `MainPage` instance), which exposes
+    `is_ribbon_enabled(name)`/`click_ribbon(name)` — these dispatch to `AccuMateApp.get_uia_window()`
+    + `controls/ribbon_controls.py` helpers, since ribbon buttons aren't real win32 controls and
+    require the UIA backend.
+- UIA inspection test (exercises `controls/debug_tools.safe_dump_control`, which wraps
+  `controls/uia_sta.run_in_sta` to describe a control from a dedicated STA thread):
+  `pytest -s -v tests/unit_test_uia_inspection.py`
+- Both of these are excluded from the default `pytest -s -v` run because they don't match
+  `python_files = test_*.py` in `pytest.ini` — invoke them by explicit path as shown above.
+
+No linter or build step is configured for this project.
+
+## Architecture (App → Controls → Pages → Workflows → Tests)
+
+- **`app/application.py`** — `AccuMateApp` launches/attaches to the real `.exe` (path is the
+  hardcoded `APP_EXE` constant) and exposes `get_window()` (win32 backend; matches via
+  `title_re=".*AccuMate for AccuLoad\s*$"` **and** `class_name_re="^Afx:"` — a plain exact
+  `title=APP_TITLE` match breaks once any file loads, since the title becomes
+  `"<filename> - AccuMate for AccuLoad"`, and a naive `title_re`-only match is ambiguous because the
+  ribbon's `AFX_SUPERBAR_TAB:...` owned window shares the same title text; the main frame's class
+  always starts with `"Afx:"`, which disambiguates it), `get_uia_window()` (attaches to the same
+  HWND via the UIA backend, cached on `self._uia_app`, needed for ribbon/dialog controls not
+  exposed natively), `is_device_connected()` (checks whether the ribbon's "Pull All From AccuLoad"
+  button is enabled — see device connectivity below) and `wait_for_device_connection(timeout)`
+  (polls `is_device_connected()`; never raises, returns `True`/`False`). Almost everything else
+  takes an `app_obj`/`app` argument and calls back into this.
+- **`controls/common_controls.py`** — low-level, backend-agnostic helpers for polling for a
+  control by class name (`wait_for_control`), and fetching `SysListView32`/`SysTreeView32`
+  wrappers and row text. Poll-with-timeout (not hard sleeps) is the pattern for control lookup.
+  Uses `.descendants(class_name=...)` rather than `.child_window()` (see the wrapper vs.
+  `WindowSpecification` note below).
+- **`pages/main_page.py`** — `MainPage` is a page-object wrapping tree/list interactions
+  (`select_tree_path`, `select_list_item`, `edit_value`, `edit_dropdown_value`, `get_value`,
+  `is_ribbon_enabled`, `click_ribbon`). Every public interaction method is decorated with
+  `@auto_step`, which auto-captures a numbered screenshot into
+  `screenshots/<test_name>/NN_<method>_<timestamp>.png` after each step — this is the primary
+  debugging aid when a headless/CI run fails, since you can't watch the UI live.
+- **`workflows/`** — higher-level, multi-step flows composed from `app`/`controls` (e.g.
+  `file_workflows.load_test_file`/`load_config_file` drive the native Open-file dialog to load
+  either the default `TEST_FILE` or an arbitrary saved config path; `security_workflows.
+  enter_passcode` handles the passcode modal including an "incorrect passcode" retry path;
+  `comm_workflows.configure_ip_and_connect` drives the device-connectivity flow — see below).
+  Workflows are plain functions taking `app_obj`, not classes.
+- **`tests/`** — pytest tests compose `app` fixture + `workflows` + `MainPage` into end-to-end
+  scenarios. Tests print a `[STEP]` line before each logical action for traceability. The root
+  `conftest.py` also registers the `--accumate-config-file`/`--accumate-device-ip` CLI options and
+  `config_file`/`device_ip` fixtures used to point tests at a real, previously-saved AccuMate config
+  and device IP for device-connectivity testing, plus the `requires_device` marker.
+
+## Device connectivity (real AccuLoad hardware)
+
+- **Tree/list presence is NOT a valid "connected" signal.** `SysTreeView32`/`SysListView32` populate
+  as soon as a config *file* loads/parses — completely independent of whether AccuMate has a live
+  device connection. An earlier version of `wait_for_device_connection()` used tree presence and
+  was a false heuristic (confirmed by a populated tree next to a status bar reading
+  "Offline"/"Comm Not Enabled").
+- **The status bar's "ONLINE"/"Offline" text is not exposed to automation at all** — it's rendered
+  in a custom, owner-drawn region with no matching control/text found via either the win32 or UIA
+  backend descendant scans.
+- **The reliable, UIA-readable proxy is ribbon button enablement**: "Pull All From AccuLoad" /
+  "Push All to AccuLoad" / "Go Offline" are enabled only while genuinely online, and disabled while
+  offline (confirmed by toggling "Go Offline"/"Retry Comm" against the visible status bar).
+  `AccuMateApp.is_device_connected()` checks this via `controls/ribbon_controls.
+  is_ribbon_button_enabled(uia_win, "Pull All From AccuLoad")`.
+- **Configuring and connecting to a device**: `workflows/comm_workflows.configure_ip_and_connect
+  (app_obj, ip_address, timeout)` opens the "AccuMate Communications Settings" dialog (ribbon
+  "Document Options" button, `class_name="#32770"`), sets the `SysIPAddress32` control (`control_id
+  1028`) via `click_input()` + `type_keys()` (setting it via `ctypes.SendMessage(IPM_SETADDRESS)`
+  is unreliable — readback via `IPM_GETADDRESS` returns `0.0.0.0` across the 32-bit/64-bit process
+  boundary even when the set actually succeeded; verify via `.window_text()` instead), clicks OK
+  (`control_id 1`), clicks ribbon "Retry Comm", then polls `wait_for_device_connection()`.
+  `open_communications_settings()` retries the ribbon click a couple of times since the app can
+  still be settling (e.g. finishing its own initial connection attempt) right after a config file
+  loads, and the first click can be missed.
+
+## Key conventions
+
+- **Dual-backend dialog handling**: modal dialogs (`class_name="#32770"`) are attached via the
+  `win32` backend for waiting/finding, then re-attached via the `uia` backend (using the same
+  HWND) when UIA-only features are needed (e.g. `set_edit_text` on an Edit control in the Open
+  file dialog). See `workflows/file_workflows.open_file_dialog` for the pattern.
+- **UIA element lookups must use `automation_id`, not `title`/`control_type` alone**: modern
+  Explorer-style common dialogs expose many controls with the same generic title/type (e.g. the
+  Open dialog has 14 `Edit`-type elements — list view columns, search box, etc. — and 3
+  `Button`-type elements titled "Open"). `child_window(title=..., control_type=...)` alone raises
+  `ElementAmbiguousError` in these cases. Prefer stable `automation_id`s discovered by probing the
+  real dialog (e.g. `"1148"` for the filename edit box, `"1"`/`"2"` for the standard
+  `IDOK`/`IDCANCEL` Open/Cancel buttons) — see `workflows/file_workflows.open_file_dialog`.
+- **`child_window()` only exists on `WindowSpecification`, not on a resolved wrapper**
+  (`.wrapper_object()`'s return value). `AccuMateApp.get_window()`/`get_uia_window()` both return
+  resolved wrappers, so any code calling `.child_window()` on their result raises
+  `AttributeError`. This was the root cause of multiple real bugs this session
+  (`ribbon_controls.find_ribbon_button`, `common_controls.wait_for_control`,
+  `comm_workflows._find_by_control_id`) — the fix is to scan `.descendants()` (optionally filtered
+  by `class_name=...`) and match manually (by `window_text()`/`control_id()`/etc.) instead.
+- **COM STA requirement**: `tests/conftest.py` has an autouse fixture that calls
+  `pythoncom.CoInitialize()`/`CoUninitialize()` around every test — required because pywinauto's
+  UIA backend needs an STA-threaded apartment. Don't remove this without understanding the
+  `0x80040155`/`0x8001010D` COM errors it prevents.
+- **List/tree interaction is coordinate + keyboard driven**: editing a `SysListView32` cell (e.g.
+  `MainPage.edit_value`/`edit_dropdown_value`) works by selecting the row, clicking an
+  approximate pixel offset for the target column (`VALUE_COLUMN_X_OFFSET`), then driving edit
+  mode via `send_keys` (`{F2}`, `^a`, `{ENTER}`, `{DOWN}`/`{UP}`). There's no reliable
+  accessibility API for these controls, so changes to column layout will require adjusting the
+  hardcoded offsets.
+- **Teardown always screenshots then force-kills**: both the root `conftest.py` fixture and
+  `MainPage._auto_screenshot` swallow screenshot/teardown exceptions (`try/except` + `[WARN]`
+  print) so a failure capturing a screenshot never masks the real test failure; the app process
+  is killed via `taskkill /PID <pid> /F /T` to avoid orphaned processes between runs.
+- Debug/status output uses consistent bracketed tags (`[DEBUG]`, `[INFO]`, `[STEP]`, `[WARN]`,
+  `[ERROR]`) via `print()` rather than a logging framework (except pywinauto's own logger, which
+  `tests/conftest.py` silences to `ERROR` level).

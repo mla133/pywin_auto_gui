@@ -8,21 +8,27 @@ def wait_for_control(app_obj, class_name, timeout=10):
         win = app_obj.get_window()
 
         try:
-            ctrl = win.child_window(class_name=class_name)
-            ctrl.wrapper_object()
-            return ctrl
+            # win is already a resolved wrapper (not a WindowSpecification),
+            # so child_window() isn't available here - scan descendants by
+            # class name instead.
+            matches = win.descendants(class_name=class_name)
+
+            if matches:
+                return matches[0]
         except Exception:
-            time.sleep(0.3)
+            pass
+
+        time.sleep(0.3)
 
     raise TimeoutError(f"{class_name} not found")
 
 
 def get_list(app_obj):
-    return wait_for_control(app_obj, "SysListView32").wrapper_object()
+    return wait_for_control(app_obj, "SysListView32")
 
 
 def get_tree(app_obj):
-    return wait_for_control(app_obj, "SysTreeView32").wrapper_object()
+    return wait_for_control(app_obj, "SysTreeView32")
 
 
 def get_list_row_texts(lst, row_index):

@@ -1,4 +1,5 @@
 from controls.common_controls import get_list, get_tree, get_list_row_texts
+from controls.ribbon_controls import is_ribbon_button_enabled, click_ribbon_button
 from pywinauto.keyboard import send_keys
 import time
 from datetime import datetime
@@ -250,3 +251,12 @@ class MainPage:
         print(f"[INFO] Selected dropdown value: {target_option}")
 
         return row_index
+
+    def is_ribbon_enabled(self, button_name):
+        uia_win = self.app.get_uia_window()
+        return is_ribbon_button_enabled(uia_win, button_name)
+
+    @auto_step
+    def click_ribbon(self, button_name):
+        uia_win = self.app.get_uia_window()
+        click_ribbon_button(uia_win, button_name)
