@@ -246,6 +246,36 @@ No linter or build step is configured for this project.
   app) to validate section/step/expected-result extraction and whole-step pattern matching, including a
   regression test for the click-catch-all false positive above, plus tests asserting which handlers do
   and don't carry a verifier.
+- **Extending automation to read-only "Navigate + Pull Selected" steps**: `_tc_navigate_and_click_ribbon`
+  matches the bounded pattern `"Navigate to the X -> Y.  Click the 'Z' Ribbon button."` (e.g. `ALIV-3929.md`'s
+  "Navigate to the System Directory -> Security Directory.  Click the 'Pull Selected from AccuLoad' Ribbon
+  button.") and calls `page.select_tree_path([X, Y])` then `page.click_ribbon(Z)`. This is safe to automate
+  because it's read-only (pulls values *from* the device, writes nothing) and consumes no passcode. It
+  explicitly guards against a false PASS: it first checks `page.is_ribbon_enabled(Z)` and raises if disabled,
+  since "Pull Selected from AccuLoad" silently no-ops when the device isn't connected - without this guard
+  the step would look like it succeeded when it actually did nothing. Its verifier,
+  `_verify_no_passcode_prompt` (via `_dialog_present`), confirms no unexpected `#32770` dialog appeared. Live
+  testing against a genuinely offline device correctly produced `AUTO/FAIL` with the message "Ribbon button
+  'Pull Selected from AccuLoad' is disabled (device likely not connected) - cannot safely verify this step" -
+  an honest failure rather than a false pass.
+- **Clause-level auto-check assist for MANUAL steps** (`auto_check_value_clauses`): most remaining steps are
+  still compound (mixing passcode entry, connectivity actions, and value confirmations) and are correctly
+  left as MANUAL - but where a step or its Expected Result contains a clause of the exact bounded shape
+  `"Confirm/Verify that X is/are set to 'Y'"`, this function reads the *actual* current value via
+  `page.get_value()` (a pure listview read, no side effects) and reports whether it matches. It never
+  changes the step's AUTO/MANUAL classification or the human's PASS/FAIL/SKIP verdict - it only prints
+  `[AUTO-CHECK]` hint lines before `_prompt_manual_verdict` asks for a verdict, and folds the same hints into
+  the recorded note (visible in the generated report) regardless of what the human decides. Clauses this
+  bounded pattern can't safely resolve are silently skipped, never guessed at:
+  - Compound clauses joining two parameters (e.g. `"Confirm that both *1903 - ...* & *1904 - ...* is set to
+    ..."`) are detected (`"&"` or the word "both" in the captured parameter) and skipped whole, rather than
+    guessing which side of the `&` the expected value applies to.
+  - Negated claims (`"is set to anything other than ..."`) don't match the `is/are set to '<value>'` shape at
+    all, so they're never mis-parsed as a positive assertion.
+  - If `page.get_value()` raises (e.g. the parameter isn't in the currently-displayed list view), the hint
+    reports "could not read current value" rather than a false mismatch - confirmed live against
+    `ALIV-3929.md`, since a freshly-loaded config's Security Directory parameters aren't visible until the
+    tree is navigated there.
 
 ## Markdown scenario runner (plain-English test scripts)
 

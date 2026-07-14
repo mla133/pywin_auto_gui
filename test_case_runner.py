@@ -170,6 +170,75 @@ def split_into_clauses(text):
     return [c.strip() for c in _CLAUSE_SPLIT_RE.split(text) if c.strip()]
 
 
+# Bounded, per-clause pattern for read-only value assertions embedded in an
+# otherwise-compound step, e.g. "Confirm that *1903 - Ethernet Host Security
+# Level* is set to "No Security"." - anchored to the whole clause (not the
+# whole step), so it's exactly as safe as the whole-step matching above: a
+# clause this pattern doesn't fully match (e.g. a compound "X & Y is set to
+# Z" clause, or "is set to anything other than ...") is simply skipped
+# rather than guessed at.
+_CLAUSE_VALUE_CHECK_RE = re.compile(
+    r"^(?:confirm|verify)(?: that)? (.+?) (?:is|are) set to [\"'](.+?)[\"']\.?$",
+    re.IGNORECASE,
+)
+
+
+def auto_check_value_clauses(tc_step, page):
+    """
+    Best-effort, READ-ONLY auto-check for simple "Confirm/Verify that
+    <parameter> is set to '<value>'" clauses embedded in a step's text
+    and/or Expected Result - using page.get_value() (a plain listview read;
+    no UI action, no device write, no passcode involved).
+
+    This is deliberately NOT used to change a step's recorded PASS/FAIL/SKIP
+    verdict - most of these steps are compound (they also involve passcodes,
+    connectivity, or other actions a human still needs to judge) - but it
+    surfaces a concrete, automatically-checked fact per clause to help
+    whoever performs the manual verification, instead of leaving the whole
+    step as an unassisted guess. Returns a list of
+    (parameter, expected_value, actual_value_or_None, ok_or_None) tuples;
+    `ok` is None (with actual_value None) when the parameter couldn't be
+    read at all (e.g. not visible in the currently-selected directory's
+    list view) rather than guessed at.
+
+    Clauses this pattern doesn't cleanly match (e.g. "*A* & *B* is set to
+    ...", or negated claims like "is set to anything other than ...") are
+    silently skipped - the whole point of anchoring to the whole clause is
+    that an unmatched clause means "don't know", never a wrong guess.
+    """
+    checks = []
+    text = tc_step.text
+    if tc_step.expected_result:
+        text = f"{text}  {tc_step.expected_result}"
+
+    for clause in split_into_clauses(text):
+        m = _CLAUSE_VALUE_CHECK_RE.match(clause.strip())
+        if not m:
+            continue
+
+        raw_param, expected_value = m.group(1), m.group(2)
+        # Compound clauses (e.g. "both *A* & *B* is set to ...") are never
+        # split further here - matching them would require guessing which
+        # side of the "&" the expected value applies to.  Skip entirely.
+        if "&" in raw_param or re.search(r"\bboth\b", raw_param, re.IGNORECASE):
+            continue
+
+        param = raw_param.strip("*_ ")
+        if "->" in param:
+            param = param.split("->")[-1].strip()
+
+        try:
+            actual_value = page.get_value(param)
+        except Exception:
+            checks.append((param, expected_value, None, None))
+            continue
+
+        ok = actual_value.strip().lower() == expected_value.strip().lower()
+        checks.append((param, expected_value, actual_value, ok))
+
+    return checks
+
+
 # Small, curated set of additional literal phrasings seen in formal
 # test-case documents that are unambiguous and safe to fully automate.
 # Deliberately NOT trying to cover every phrasing variant here - anything
@@ -222,6 +291,30 @@ def _tc_start_app(app, page, m, base_dir):
 def _tc_load_test_configuration_file(app, page, m, base_dir):
     config_path = _resolve_config_path(m.group(1), base_dir)
     load_config_file(app, config_path)
+
+
+# "Navigate to the X -> Y.  Click the 'Z' Ribbon button." is a common, safe
+# pattern in these documents for *read-only* directory operations (Pull
+# Selected/Pull All) - no parameter value is written and no passcode is
+# consumed, unlike the "attempt to change ..." steps, so it's safe to
+# automate the navigation + ribbon click itself. Real example (ALIV-3929.md):
+# "Navigate to the System Directory -> Security Directory.  Click the
+# 'Pull Selected from AccuLoad' Ribbon button."
+@_testcase_step(
+    r"^navigate to the ['\"]?(.+?)['\"]? -> ['\"]?(.+?)['\"]?\.\s*"
+    r"click the ['\"](.+?)['\"] ribbon button\.?$"
+)
+def _tc_navigate_and_click_ribbon(app, page, m, base_dir):
+    parent, child, button_name = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+    page.select_tree_path([parent, child])
+
+    if not page.is_ribbon_enabled(button_name):
+        raise RuntimeError(
+            f"Ribbon button '{button_name}' is disabled (device likely not connected) - "
+            "cannot safely verify this step"
+        )
+
+    page.click_ribbon(button_name)
 
 
 # scenario_runner's step grammar was designed for purpose-written, single-
@@ -318,10 +411,36 @@ def _verify_connected(app, page, m, base_dir):
     return connected, ("device reports connected" if connected else "device reports NOT connected")
 
 
+def _dialog_present(app, timeout=3):
+    """
+    True if any generic #32770 dialog (passcode prompt, error popup, etc.)
+    is currently showing. Used to verify the *absence* of an unexpected
+    passcode/credentials prompt after a read-only directory pull, per
+    _verify_no_passcode_prompt below.
+    """
+    try:
+        return app.app.window(class_name="#32770").exists(timeout=timeout)
+    except Exception:
+        return False
+
+
+def _verify_no_passcode_prompt(app, page, m, base_dir):
+    """
+    For _tc_navigate_and_click_ribbon: the Expected Result claims the pull
+    completes "without prompting for credentials" - verify that no #32770
+    dialog (the passcode prompt's window class) appeared as a side effect.
+    """
+    prompted = _dialog_present(app, timeout=3)
+    return (not prompted), ("no passcode/credentials prompt appeared" if not prompted
+                             else "an unexpected dialog appeared after the pull")
+
+
 # Keyed by the _TESTCASE_STEP_PATTERNS handler function.
 _STEP_VERIFIERS = {
     _tc_load_test_configuration_file: _verify_config_file_loaded,
+    _tc_navigate_and_click_ribbon: _verify_no_passcode_prompt,
 }
+
 
 # Keyed by the scenario_runner handler function (subset of _SAFE_STEP_HANDLERS).
 _SR_STEP_VERIFIERS = {
@@ -368,20 +487,40 @@ def match_testcase_step(step_text, base_dir):
     return None, None
 
 
-def _prompt_manual_verdict(step):
+def _format_auto_checks(checks):
+    lines = []
+    for param, expected_value, actual_value, ok in checks:
+        if ok is None:
+            lines.append(f"[AUTO-CHECK] '{param}' expected '{expected_value}' - could not read current value")
+        elif ok:
+            lines.append(f"[AUTO-CHECK] '{param}' = '{actual_value}' (matches expected '{expected_value}')")
+        else:
+            lines.append(f"[AUTO-CHECK] '{param}' = '{actual_value}' (expected '{expected_value}' - MISMATCH)")
+    return lines
+
+
+def _prompt_manual_verdict(step, page=None):
     print(f"    [MANUAL] Perform this step by hand: {step.text}")
     if step.expected_result:
         print(f"    [MANUAL] Expected result: {step.expected_result}")
 
+    auto_check_notes = []
+    if page is not None:
+        checks = auto_check_value_clauses(step, page)
+        for line in _format_auto_checks(checks):
+            print(f"    {line}")
+        auto_check_notes = [line for line in _format_auto_checks(checks) if "could not read" not in line]
+
     while True:
         answer = input("    Result? [p]ass / [f]ail / [s]kip: ").strip().lower()
         if answer in ("p", "pass"):
-            return "PASS", None
+            return "PASS", "; ".join(auto_check_notes) or None
         if answer in ("f", "fail"):
             note = input("    Failure notes (optional): ").strip()
-            return "FAIL", note or None
+            combined = "; ".join([note] + auto_check_notes) if note else ("; ".join(auto_check_notes) or None)
+            return "FAIL", combined or None
         if answer in ("s", "skip"):
-            return "SKIP", None
+            return "SKIP", "; ".join(auto_check_notes) or None
         print("    Please enter 'p', 'f', or 's'.")
 
 
@@ -432,7 +571,7 @@ def run_test_case(markdown_path, report_path=None):
                         print(f"  [AUTO] FAILED: {e}")
                         results.append((section.title, tc_step, "AUTO", "FAIL", str(e)))
                 else:
-                    verdict, note = _prompt_manual_verdict(tc_step)
+                    verdict, note = _prompt_manual_verdict(tc_step, page)
                     results.append((section.title, tc_step, "MANUAL", verdict, note))
     finally:
         sr._teardown(app, markdown_path)

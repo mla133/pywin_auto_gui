@@ -125,11 +125,27 @@ def test_match_testcase_step_falls_back_to_scenario_runner_grammar():
 
 def test_match_testcase_step_returns_none_for_compound_manual_step():
     sections = tcr.parse_test_case_document(ALIV_3929_PATH)
-    compound_step = sections[0].steps[3]  # step 4: navigate + click ribbon button
+    compound_step = sections[0].steps[4]  # step 5: double-click + change value + click OK
 
     handler, m = tcr.match_testcase_step(compound_step.text, base_dir=".")
 
     assert handler is None
+
+
+def test_match_testcase_step_recognizes_navigate_and_click_ribbon():
+    # Step 4 of "Testing Parameter Security Passcode Access" - a read-only
+    # directory pull (no value written, no passcode consumed), safe to
+    # automate unlike the "attempt to change ..." steps.
+    sections = tcr.parse_test_case_document(ALIV_3929_PATH)
+    navigate_step = sections[0].steps[3]  # step 4
+
+    handler, m = tcr.match_testcase_step(navigate_step.text, base_dir=".")
+
+    assert handler is not None
+    assert m.group(1) == "System Directory"
+    assert m.group(2) == "Security Directory"
+    assert m.group(3) == "Pull Selected from AccuLoad"
+    assert callable(getattr(handler, "verifier", None))
 
 
 def test_match_testcase_step_does_not_false_positive_on_messy_click_prose():
@@ -196,4 +212,71 @@ def test_connect_to_ip_handler_has_verifier():
 
     assert handler is not None
     assert callable(getattr(handler, "verifier", None))
+
+
+class _FakePage:
+    """Minimal stand-in for pages.MainPage - just get_value(), no live app."""
+
+    def __init__(self, values):
+        self._values = values
+
+    def get_value(self, target_text):
+        for key, value in self._values.items():
+            if target_text in key:
+                return value
+        raise RuntimeError(f"{target_text} not found")
+
+
+def test_auto_check_value_clauses_matches_simple_confirmation():
+    sections = tcr.parse_test_case_document(ALIV_3929_PATH)
+    ethernet_section = next(s for s in sections if s.title == "Testing Ethernet Host Security Level")
+    step = ethernet_section.steps[0]  # "Confirm that *1903 - Ethernet Host Security Level* is set to 'No Security'."
+
+    page = _FakePage({"1903 - Ethernet Host Security Level": "No Security"})
+    checks = tcr.auto_check_value_clauses(step, page)
+
+    assert ("1903 - Ethernet Host Security Level", "No Security", "No Security", True) in checks
+
+
+def test_auto_check_value_clauses_reports_mismatch():
+    sections = tcr.parse_test_case_document(ALIV_3929_PATH)
+    ethernet_section = next(s for s in sections if s.title == "Testing Ethernet Host Security Level")
+    step = ethernet_section.steps[0]
+
+    page = _FakePage({"1903 - Ethernet Host Security Level": "Security Level 3"})
+    checks = tcr.auto_check_value_clauses(step, page)
+
+    param, expected_value, actual_value, ok = checks[0]
+    assert expected_value == "No Security"
+    assert actual_value == "Security Level 3"
+    assert ok is False
+
+
+def test_auto_check_value_clauses_skips_unreadable_parameter():
+    sections = tcr.parse_test_case_document(ALIV_3929_PATH)
+    ethernet_section = next(s for s in sections if s.title == "Testing Ethernet Host Security Level")
+    step = ethernet_section.steps[0]
+
+    page = _FakePage({})  # parameter not visible in the current list view
+    checks = tcr.auto_check_value_clauses(step, page)
+
+    param, expected_value, actual_value, ok = checks[0]
+    assert actual_value is None
+    assert ok is None
+
+
+def test_auto_check_value_clauses_skips_compound_ampersand_clause():
+    # "Confirm that both *1903...* & *1904...* is set to 'Security Level 3'."
+    # is a compound clause our bounded per-clause pattern deliberately does
+    # not try to split further (see auto_check_value_clauses docstring) -
+    # it should be silently skipped, not guessed at.
+    sections = tcr.parse_test_case_document(ALIV_3929_PATH)
+    whitelist_section = next(s for s in sections if s.title == "Testing Whitelisted IP parameters")
+    step = whitelist_section.steps[0]
+
+    page = _FakePage({})
+    checks = tcr.auto_check_value_clauses(step, page)
+
+    # A compound "both X & Y" clause is skipped entirely, not guessed at.
+    assert checks == []
 
