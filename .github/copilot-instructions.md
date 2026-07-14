@@ -177,13 +177,18 @@ No linter or build step is configured for this project.
   Application"`, `"Load test configuration file '<name>' file"`) plus `scenario_runner`'s general step
   grammar; anything else pauses and prompts the human to perform/verify it and record a `pass`/`fail`/
   `skip` verdict (`_prompt_manual_verdict`).
-- **`scenario_runner`'s generic `"click <name>"` ribbon catch-all is deliberately excluded** from this
-  whole-step fallback (`_UNSAFE_FOR_WHOLE_STEP_MATCHING`) — real testing against `ALIV-3929.md` caught
-  it wrongly capturing filler words as a literal button name (e.g. `"Click on the 'Open' button in the
-  top left corner of the application."` → tried to click a ribbon button named `'on the "Open" button
-  in the top left corner...'`) instead of correctly falling back to a manual step. That catch-all is
-  fine for `scenario_runner`'s own purpose-written, single-clause scenario files, but unsafe for messy
-  real-world prose.
+- **Only an explicit allowlist of `scenario_runner` patterns is reused for whole-step matching**
+  (`_SAFE_STEP_HANDLERS`) — several of its patterns use an open-ended, non-greedy-but-end-anchored
+  capture (e.g. `"click <name>"`, `"set/change X to Y"`) that's fine for a clean, purpose-written
+  scenario line but unsafe against messy compound prose. Real testing against `ALIV-3929.md` caught
+  **two** separate false positives this way: `"Click on the 'Open' button in the top left corner of the
+  application."` got its filler words captured as a literal (bogus) button name, and `"Change Security
+  Directory -> Ethernet Host Security Level to 'No Security'.  Confirm the AccuLoad updated the
+  parameter.  Go offline..."` had its entire trailing sentence swallowed as the "value" by the
+  `set/change ... to ...` pattern — both attempted (and failed) a wrong auto-action instead of correctly
+  falling back to a manual step. Rather than denylist each newly-discovered unsafe pattern, the fix
+  flipped to an allowlist of only genuinely bounded patterns (fixed literal phrases, or capture groups
+  constrained to an IPv4 address / single token / bare number that can't absorb an unrelated clause).
 - **Passcodes are always manual, on purpose** — real per-site security passcodes referenced abstractly
   in these documents ("the passcode for security level 3") have no business living in a Markdown file
   or this repo, so passcode-entry steps always pause rather than sourcing a value automatically.

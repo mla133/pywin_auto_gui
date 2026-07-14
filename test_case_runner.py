@@ -200,26 +200,43 @@ def _tc_load_test_configuration_file(app, page, m, base_dir):
     load_config_file(app, config_path)
 
 
-# scenario_runner's generic "click <name>" catch-all is intentionally loose
-# (see its own docstring) because it's meant for purpose-written, single-
-# clause scenario files where the whole line *is* the button name. Formal
-# test-case prose is much messier ("Click on the 'Open' button in the top
-# left corner of the application.") and that looseness lets filler words
-# slip into the captured button name, causing a wrong auto-click attempt
-# instead of correctly falling back to a manual step. So it's excluded from
-# the whole-step fallback here - real testing against ALIV-3929.md caught
-# this exact false positive.
-_UNSAFE_FOR_WHOLE_STEP_MATCHING = {sr._step_click_ribbon}
+# scenario_runner's step grammar was designed for purpose-written, single-
+# clause scenario files where the whole line *is* the instruction. Several
+# of those patterns use an open-ended, non-greedy capture anchored only at
+# the end of the string (e.g. "set X to Y", "click <name>") - fine for a
+# clean one-line scenario step, but unsafe against messy, compound
+# test-case prose: a real run against ALIV-3929.md showed both the
+# "click <name>" catch-all AND "change X to Y" wrongly swallowing an
+# entire trailing sentence ("Change Security Directory -> ... to 'No
+# Security'.  Confirm the AccuLoad updated the parameter.  Go offline...")
+# into the captured value, then attempting (and failing) a bogus action
+# instead of correctly falling back to a manual step.
+#
+# Rather than denylist the risky patterns one at a time as each new false
+# positive surfaces, this is an explicit ALLOWLIST of scenario_runner
+# handlers judged genuinely bounded/safe for whole-step matching against
+# arbitrary prose: each either matches a short, literal fixed phrase, or
+# has a tightly-constrained capture group (an IPv4 regex, a single
+# whitespace-free token, a bare number) that can't accidentally absorb an
+# unrelated trailing clause.
+_SAFE_STEP_HANDLERS = {
+    sr._step_load_test_file,
+    sr._step_load_config_file,
+    sr._step_connect_to_ip,
+    sr._step_enter_passcode,
+    sr._step_assert_connected,
+    sr._step_assert_disconnected,
+    sr._step_wait,
+}
 
 
 def match_testcase_step(step_text, base_dir):
     """
     Try to match a whole step's text against the curated fully-automatable
-    patterns, falling back to scenario_runner's general step grammar (minus
-    patterns judged unsafe for messy, compound test-case prose - see
-    _UNSAFE_FOR_WHOLE_STEP_MATCHING). Returns (handler, args) where
-    handler(app, page, *args) executes the step, or (None, None) if nothing
-    matched (-> manual step).
+    patterns, falling back to the allowlisted subset of scenario_runner's
+    general step grammar (see _SAFE_STEP_HANDLERS). Returns (handler, args)
+    where handler(app, page, *args) executes the step, or (None, None) if
+    nothing matched (-> manual step).
     """
     stripped = step_text.strip()
 
@@ -229,7 +246,7 @@ def match_testcase_step(step_text, base_dir):
             return (lambda app, page, m=m, handler=handler: handler(app, page, m, base_dir)), m
 
     for pattern, handler in sr._STEP_PATTERNS:
-        if handler in _UNSAFE_FOR_WHOLE_STEP_MATCHING:
+        if handler not in _SAFE_STEP_HANDLERS:
             continue
         m = pattern.match(stripped)
         if m:

@@ -125,3 +125,23 @@ def test_match_testcase_step_does_not_false_positive_on_messy_click_prose():
     )
 
     assert handler is None
+
+
+def test_match_testcase_step_does_not_false_positive_on_change_to_prose():
+    # Regression test: scenario_runner's "change/set X to Y" pattern's
+    # non-greedy-but-end-anchored capture previously swallowed an entire
+    # trailing compound sentence as the "value" (e.g. real step 4 of
+    # "Testing Dump Selected/Dump All functionality" - "Change Security
+    # Directory -> Ethernet Host Security Level to 'No Security'.  Confirm
+    # the AccuLoad updated the parameter.  Go offline with AccuMate, then
+    # Retry Comm to reconnect.  Attempt to push the selected Security
+    # Directory -> Security Directory again." - matched as one edit_value
+    # call and failed with "SysListView32 not found" instead of correctly
+    # falling back to a manual step.
+    sections = tcr.parse_test_case_document(ALIV_3929_PATH)
+    dump_section = next(s for s in sections if s.title == "Testing Dump Selected/Dump All functionality")
+    compound_step = dump_section.steps[3]  # step 4
+
+    handler, m = tcr.match_testcase_step(compound_step.text, base_dir=".")
+
+    assert handler is None
