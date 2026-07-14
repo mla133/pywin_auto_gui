@@ -156,6 +156,43 @@ No linter or build step is configured for this project.
   (`automation_id="1001"`) and clicks Save (`automation_id="1"`) using the same dual-backend
   win32+UIA dialog pattern as `open_file_dialog`, then handles the overwrite-confirmation loop.
 
+## Hybrid test-case runner (formal wiki-markup test documents)
+
+- **`test_case_runner.py`** handles a *different, messier* input format than `scenario_runner.py`:
+  real Jira/Confluence-exported manual test case documents (see `scenarios/ALIV-3929.md`) written in
+  Confluence wiki markup (`h3.`/`h4.` headers, `_italic_`/`*bold*`), with compound multi-action numbered
+  steps, an `Expected Result: ..._` line, and a trailing `*[PASS/FAIL]*` marker meant for a *human*
+  tester to fill in — nothing like the purpose-built scenario Markdown format above.
+  ```bash
+  python test_case_runner.py scenarios/ALIV-3929.md --report scenarios/ALIV-3929-report.md
+  ```
+- **`parse_test_case_document(path)`** extracts `TestSection`/`TestStep` objects only from content under
+  `"h4."` headers — everything before the first `h4.` (the `h3.` title, notes, a settings-value list)
+  is preamble/context, not steps, and is intentionally skipped.
+- **Deliberately a *hybrid*, not a full auto-executor**: most real test-case steps bundle several UI
+  actions with a state verification that fundamentally requires a human to read the screen anyway, so
+  clause-splitting a compound sentence for partial automation was evaluated and rejected as adding
+  fragility without saving real effort. Instead, **each whole step's text** is checked against a small
+  curated set of fully-automatable phrasings (`_TESTCASE_STEP_PATTERNS`, e.g. `"Start the Accumate
+  Application"`, `"Load test configuration file '<name>' file"`) plus `scenario_runner`'s general step
+  grammar; anything else pauses and prompts the human to perform/verify it and record a `pass`/`fail`/
+  `skip` verdict (`_prompt_manual_verdict`).
+- **`scenario_runner`'s generic `"click <name>"` ribbon catch-all is deliberately excluded** from this
+  whole-step fallback (`_UNSAFE_FOR_WHOLE_STEP_MATCHING`) — real testing against `ALIV-3929.md` caught
+  it wrongly capturing filler words as a literal button name (e.g. `"Click on the 'Open' button in the
+  top left corner of the application."` → tried to click a ribbon button named `'on the "Open" button
+  in the top left corner...'`) instead of correctly falling back to a manual step. That catch-all is
+  fine for `scenario_runner`'s own purpose-written, single-clause scenario files, but unsafe for messy
+  real-world prose.
+- **Passcodes are always manual, on purpose** — real per-site security passcodes referenced abstractly
+  in these documents ("the passcode for security level 3") have no business living in a Markdown file
+  or this repo, so passcode-entry steps always pause rather than sourcing a value automatically.
+- Results are collected per step (`AUTO`/`MANUAL`, verdict, notes) and written to a Markdown report
+  (default `<input-name>-report.md` next to the input file, or `--report <path>`).
+- `tests/test_test_case_runner.py` parses the real `scenarios/ALIV-3929.md` fixture directly (no live
+  app) to validate section/step/expected-result extraction and whole-step pattern matching, including a
+  regression test for the click-catch-all false positive above.
+
 ## Markdown scenario runner (plain-English test scripts)
 
 - **`scenario_runner.py`** (repo root) is a standalone script — *not* a pytest test — that reads a
