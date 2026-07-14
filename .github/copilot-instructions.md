@@ -156,6 +156,26 @@ No linter or build step is configured for this project.
   (`automation_id="1001"`) and clicks Save (`automation_id="1"`) using the same dual-backend
   win32+UIA dialog pattern as `open_file_dialog`, then handles the overwrite-confirmation loop.
 
+### Config reload fix (Close current document before re-opening)
+
+- **Bug**: AccuMate always has *some* document open (`DefaultAL4.dat` auto-loads on startup). Doing
+  a plain Ctrl-O to open a *different* config file while one is already open can silently pop an
+  extra "save changes?" confirmation first — which `open_file_dialog`'s wait for the `#32770` Open
+  dialog doesn't expect, so it just times out. This showed up live running `scenarios/ALIV-3929.md`:
+  the first "Load test configuration file" step (right after app start) succeeded, but the second
+  occurrence of the identical step later in the same document (re-loading the same file into an
+  already-open document) timed out.
+- **Fix**: `workflows/file_workflows.load_config_file(app_obj, config_path, close_existing=True)` now
+  closes the current document first via `close_current_file(app_obj)` — Application Button ->
+  **Close** (`item_index=6`, NOT the same as closing the whole app) — before opening the requested
+  file, so the reload always happens against a clean "nothing open" state in the same app instance.
+  `close_current_file` also handles the optional "save changes?" confirmation dialog that Close can
+  trigger, answering **No** (`control_id() == 7`, `IDNO`) — an automated test run should never
+  silently persist in-app edits back over a saved config file. Pass `close_existing=False` to skip
+  this (e.g. a caller that already knows nothing is open).
+- Verified live: both "Load test configuration file 'ALIV-3929.AL4'" steps in `ALIV-3929.md` now
+  `AUTO/PASS` (previously the second one timed out); 0 failures across all 41 steps.
+
 ## Hybrid test-case runner (formal wiki-markup test documents)
 
 - **`test_case_runner.py`** handles a *different, messier* input format than `scenario_runner.py`:

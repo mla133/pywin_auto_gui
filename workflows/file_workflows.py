@@ -18,8 +18,18 @@ TEST_FILE = os.path.normpath(
 _APP_MENU_ITEM_X_OFFSET = 85
 _APP_MENU_FIRST_ITEM_Y_OFFSET = 27  # from button bottom, to the "New" item
 _APP_MENU_ITEM_ROW_HEIGHT = 52
-# Menu item order: New(0), Open...(1), Save(2), Save As...(3)
+# Menu item order: New(0), Open...(1), Save(2), Save As...(3),
+# Firmware Update...(4), Print(5), Close(6), About(7)
 _APP_MENU_SAVE_AS_INDEX = 3
+_APP_MENU_CLOSE_INDEX = 6
+
+# Seen when closing a document that AccuMate considers modified (e.g. after
+# a connection attempt touched in-memory state) - "&Yes"/"&No" match by
+# control_id (IDYES=6, IDNO=7), same reasoning as the Save As overwrite
+# confirmation below: accelerator-prefixed titles ("&No") shouldn't be
+# matched by exact text.
+_SAVE_CHANGES_DIALOG_TITLE_RE = ".*(ave changes|onfirm).*"
+_IDNO_CONTROL_ID = 7
 
 _SAVE_AS_DIALOG_TITLE = "Save As"
 _SAVE_AS_DIALOG_CLASS = "#32770"
@@ -74,18 +84,31 @@ def load_test_file(app_obj):
     open_file_dialog(app_obj, TEST_FILE)
 
 
-def load_config_file(app_obj, config_path):
+def load_config_file(app_obj, config_path, close_existing=True):
     """
     Open an arbitrary, previously-saved AccuMate config file (e.g.
     DefaultAL4.dat or a specific .AL4 file) via the same Open-file dialog
     flow as load_test_file. Useful for device-connectivity checks, since a
     saved config may already carry the real device's connection settings
     (IP/COM port/etc.) rather than the generic Auto_Test.AL4 test data.
+
+    AccuMate always has *some* document open (it auto-loads DefaultAL4.dat
+    on startup), and re-opening a different file via Ctrl-O while a document
+    is already open can pop an extra "save changes?" confirmation first -
+    which the plain Ctrl-O -> #32770 Open-dialog wait below doesn't expect,
+    so it just times out. By default (`close_existing=True`) this closes the
+    currently-open document first (Application Button -> Close, NOT closing
+    the app itself - see close_current_file), then opens the requested file
+    in the same app instance. Pass `close_existing=False` to skip this (e.g.
+    if a caller already knows nothing is open).
     """
     config_path = os.path.normpath(config_path)
 
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"AccuMate config file not found: {config_path}")
+
+    if close_existing:
+        close_current_file(app_obj)
 
     open_file_dialog(app_obj, config_path)
 
@@ -112,6 +135,48 @@ def _click_app_menu_item(app_obj, item_index):
     y = (btn_rect.bottom - win_rect.top) + _APP_MENU_FIRST_ITEM_Y_OFFSET + item_index * _APP_MENU_ITEM_ROW_HEIGHT
 
     win.click_input(coords=(x, y))
+
+
+def close_current_file(app_obj):
+    """
+    Close the currently-open AccuMate document via the Application Button's
+    "Close" menu item - WITHOUT closing the application itself - so a
+    different config/test file can be opened afterward in the same app
+    instance (see load_config_file). If AccuMate considers the document
+    modified, Close can pop a "save changes?" confirmation dialog first;
+    that's answered "No" here, since an automated test run should never
+    silently persist in-app changes back over a saved config file.
+    """
+    print("[STEP] Opening Application menu -> Close (current document only)")
+    _click_app_menu_item(app_obj, _APP_MENU_CLOSE_INDEX)
+    time.sleep(0.5)
+
+    try:
+        confirm_dlg_spec = app_obj.app.window(
+            title_re=_SAVE_CHANGES_DIALOG_TITLE_RE, class_name="#32770"
+        )
+        if not confirm_dlg_spec.exists(timeout=2):
+            return
+    except Exception:
+        return
+
+    print("[STEP] Dismissing 'save changes?' prompt with No (discard)")
+    confirm_dlg = confirm_dlg_spec.wrapper_object()
+
+    clicked = False
+    for ctrl in confirm_dlg.descendants(class_name="Button"):
+        try:
+            if ctrl.control_id() == _IDNO_CONTROL_ID or "No" in ctrl.window_text():
+                ctrl.click_input()
+                clicked = True
+                break
+        except Exception:
+            continue
+
+    if not clicked:
+        raise RuntimeError("Could not find 'No' button on save-changes confirmation dialog")
+
+    time.sleep(0.5)
 
 
 def _open_save_as_dialog(app_obj, retries=3):
