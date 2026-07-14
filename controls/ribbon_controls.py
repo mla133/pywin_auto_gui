@@ -39,6 +39,31 @@ def click_ribbon_button(uia_win, button_name):
     btn.click_input()
 
 
+def find_app_button(uia_win):
+    """
+    Locate the MFC Ribbon "Application Button" - the round icon at the very
+    top-left of the ribbon (left of the "Home" tab) that opens the backstage
+    menu (New/Open/Save/Save As.../Firmware Update.../Print/Close/About).
+
+    Unlike named ribbon buttons, this control exposes no window_text via
+    UIA, so it can't be found with find_ribbon_button(). It's identified
+    instead as the one roughly-square Button with empty text near the
+    ribbon's top-left corner (~56x56px, larger than any other control in
+    that area).
+    """
+    for ctrl in uia_win.descendants():
+        try:
+            if ctrl.element_info.control_type != "Button" or ctrl.window_text():
+                continue
+            rect = ctrl.rectangle()
+            if (rect.right - rect.left) > 40 and (rect.bottom - rect.top) > 40:
+                return ctrl
+        except Exception:
+            continue
+
+    raise RuntimeError("Ribbon Application Button not found")
+
+
 def open_file_menu(app_obj):
     """
     Open File -> Open... from Ribbon (MFC-safe)

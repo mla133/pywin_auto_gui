@@ -118,6 +118,44 @@ No linter or build step is configured for this project.
   still be settling (e.g. finishing its own initial connection attempt) right after a config file
   loads, and the first click can be missed.
 
+## Save As workflow (ribbon Application Button)
+
+- **There is no dedicated "Save As" ribbon button or accelerator** — `F12`, `Ctrl+Shift+S`, and the
+  classic `Alt+F` menu key all do nothing (this ribbon skin has no menu bar). The only path to
+  "Save As..." is the round **Application Button** in the ribbon's top-left corner.
+- **The Application Button is a UIA `Button` with empty `window_text()`**, distinguishable only by
+  size (~56×56px, larger than any other control in that region). `controls/ribbon_controls.
+  find_app_button(uia_win)` locates it by scanning descendants for an empty-text `Button` >40×40px.
+- **Its backstage popup menu is entirely non-UIA-accessible** — clicking it spawns two `Afx:...:800:...`
+  popup HWNDs that both return **zero descendants** when scanned via UIA (stronger version of the
+  status-bar's "custom-drawn, non-automatable" pattern). Keyboard navigation (`{DOWN}`) doesn't work
+  either — it silently closes the menu. The only way to select a menu item is a **coordinate click**,
+  computed window-relative to the Application Button's own rectangle so it survives window moves (but
+  not window resizes/DPI changes):
+  ```
+  x = (app_button_rect.left - window_rect.left) + 85
+  y = (app_button_rect.bottom - window_rect.top) + 27 + item_index * 52
+  ```
+  Item order (0-based): New=0, Open...=1, Save=2, **Save As...=3**, Firmware Update...=4, Print=5,
+  Close=6, About=7.
+- **`workflows/file_workflows._click_app_menu_item`/`_open_save_as_dialog` retry (default 3
+  attempts)**: the popup's render/animation timing is flaky enough that the very first click after
+  opening the menu frequently misses in practice — every observed failure recovered on retry 2. Each
+  retry presses `{ESC}` first to dismiss any stuck/mis-clicked menu before reopening.
+- **Overwrite confirmation is a gotcha**: saving to an existing path can pop up to two sequential
+  confirmation dialogs. The OS-level common-dialog "Confirm Save As" prompt's Yes button is titled
+  `&Yes` (with an ampersand accelerator) — match it by **`control_id() == 6`** (`IDYES`), not by exact
+  title text. An earlier version matched by `title="Yes"` inside a broad `except Exception: pass`,
+  which failed **silently** (the file already existed from a prior save, so `os.path.isfile()` still
+  passed) and left a stuck modal dialog blocking teardown. Don't swallow exceptions broadly around
+  confirmation-dialog handling; `save_as()` raises `RuntimeError` loudly instead if no Yes button is
+  found. `tests/unit_test_save_as.py` also independently asserts no stray Save/Confirm dialog remains
+  open after a save, since the file-exists check alone doesn't catch this bug class.
+- `workflows/file_workflows.save_as(app_obj, save_path)` ties this together: validates the target
+  directory exists, opens Save As via the Application Button menu, sets the filename field
+  (`automation_id="1001"`) and clicks Save (`automation_id="1"`) using the same dual-backend
+  win32+UIA dialog pattern as `open_file_dialog`, then handles the overwrite-confirmation loop.
+
 ## Key conventions
 
 - **Dual-backend dialog handling**: modal dialogs (`class_name="#32770"`) are attached via the
