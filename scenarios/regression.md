@@ -153,8 +153,8 @@ h4. A5: Loading A3X Config Files
 
 h4. A6: Conversion Of Old AccuMate 4 Offsets
 
-1. Load the existing file AL4 created with an earlier version of AccuMate IV or follow steps numbered 2-15 to create the file
-    Expected Result: _Expected Result A06.AL4 is created_ *[PASS/FAIL]*
+1. Load the existing file 1-11.AL4 (in configs/) created with an earlier version of AccuMate IV or follow steps numbered 2-15 to create the file
+    Expected Result: _Expected Result 1-11.AL4 is created_ *[PASS/FAIL]*
 
 2. On the left side panel, expand the "Config Directory" section if it is not already expanded. Then expand the "Pulse Inputs" section and choose the element with the first offset.
     Expected Result: _The Pulse In 1 element is selected._ *[PASS/FAIL]*
