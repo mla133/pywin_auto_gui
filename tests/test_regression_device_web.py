@@ -312,10 +312,6 @@ def test_a11_pulling_full_configuration(app, device_ip, device_arm_addresses):
     print("[STEP] Waiting for the PULL progress dialog to complete")
     completed = wait_for_progress_dialog_to_close(app, timeout=450)
     assert completed, "Pull All from AccuLoad did not complete within the expected timeout"
-    # NOTE: this will fail if the device is currently in the corrupted network state
-    # left over from A10/A19's known disruptive Push-All bug (IP/netmask/gateway
-    # reset away from device_ip) - not a bug in the Pull itself. If this fails,
-    # confirm the device is still reachable at device_ip before investigating further.
     assert app.wait_for_device_connection(timeout=30), (
         "Expected AccuMate to still be connected after Pull All completes"
     )

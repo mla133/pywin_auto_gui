@@ -201,6 +201,19 @@ class AccuLoadWebSession:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.ui is not None:
             try:
+                # Confirmed live: leaving the device sitting inside a Program
+                # Mode session (entered by reset_to_program_mode for any of
+                # this module's get_* reads) and simply closing the browser
+                # leaves that Program Mode session open on the DEVICE side -
+                # it keeps holding control and refuses/hangs subsequent
+                # connections (including AccuMate's own), until the session is
+                # properly backed out via "Cancel and Exit" -> Yes. Always do
+                # this before quitting the driver, not just best-effort on the
+                # next session's entry.
+                ensure_run_ready_mode(self.ui)
+            except Exception as e:
+                print(f"[WARN] Failed to back out of Program Mode before closing web session: {e}")
+            try:
                 self.ui.driver.quit()
             except Exception as e:
                 print(f"[WARN] Failed to close AccuLoad web session: {e}")

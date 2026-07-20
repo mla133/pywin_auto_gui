@@ -109,7 +109,7 @@ def send_command(win, command, settle_time=2.0):
 
 def wait_for_progress_dialog_to_close(
     app_obj, timeout=400, poll_interval=2.0, appear_timeout=15,
-    title_substrings=("Writing data", "Downloading"),
+    title_substrings=("Writing data", "Downloading", "Reading"),
 ):
     """
     Wait for the "Writing data in <config> to <device> [NN%]" / "Downloading
@@ -134,8 +134,20 @@ def wait_for_progress_dialog_to_close(
     never matched this window at all - _dialog_open() was therefore always
     False and the function returned "complete" almost immediately after
     sending PUSH, well before the real transfer had even reached 1%. Detect
-    the window by title substring instead (matches both "Writing data..."
-    for PUSH and "Downloading..." for PULL).
+    the window by title substring instead (matches "Writing data..." for
+    PUSH and "Downloading..." for the Terminal Emulator's PULL command).
+
+    A SECOND real title wording was found live for the ribbon's "Pull All
+    From AccuLoad"/"Pull Selected from AccuLoad" buttons (as opposed to the
+    Terminal Emulator's typed "PULL" command): "Reading <device> ... [NN%]",
+    not "Downloading...". Neither "Writing data" nor "Downloading" matched
+    it, so the appear-wait silently timed out (logging the "never observed
+    opening" warning) and this function returned True almost immediately -
+    while a real, still-running transfer was sitting at ~30% - causing the
+    caller to proceed and the test teardown to force-kill the app mid-pull.
+    This is the same "phantom instant completion" bug class as the
+    "#32770" one above, just for a different trigger path. "Reading" is
+    now included in the default `title_substrings` to cover this case too.
 
     A full PUSH of a blank/default config was also clocked live at ~300-350
     seconds (0% to 100%, roughly linear, ~3s per percentage point) - the
