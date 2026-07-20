@@ -152,7 +152,18 @@ def wait_for_progress_dialog_to_close(app_obj, timeout=400, poll_interval=2.0, a
     pid = app_obj.get_window().process_id()
 
     def _progress_window_open():
-        for w in Desktop(backend="win32").windows():
+        try:
+            windows = Desktop(backend="win32").windows()
+        except Exception:
+            # A window (e.g. the progress dialog itself, right as it hits
+            # 100% and closes) can vanish mid-enumeration, raising
+            # InvalidWindowHandle from inside Desktop.windows() itself -
+            # before the per-window try/except below even runs. Treat this
+            # as "couldn't tell this poll" rather than letting it propagate
+            # and fail the whole wait.
+            return False
+
+        for w in windows:
             try:
                 if w.process_id() != pid or not w.is_visible():
                     continue

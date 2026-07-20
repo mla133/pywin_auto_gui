@@ -17,8 +17,16 @@ TEST_FILE = os.path.normpath(
 # Button's own rectangle (found via UIA, see find_app_button), which keeps
 # them correct regardless of the main window's position/size on screen.
 _APP_MENU_ITEM_X_OFFSET = 85
-_APP_MENU_FIRST_ITEM_Y_OFFSET = 27  # from button bottom, to the "New" item
-_APP_MENU_ITEM_ROW_HEIGHT = 52
+# Row spacing in this popup is NOT uniform (confirmed via a live screenshot
+# measurement: ~43-44px between the first few items, widening to ~47-49px
+# from "Save As..." onward, likely due to a visual separator/section break
+# in the real menu). A single fixed row-height multiplier undershoots or
+# overshoots depending on target index - this was the root cause of a real,
+# 100%-reproducible bug where clicking "Close" (index 6) actually landed on
+# "About" (index 7) instead. Each item's y-offset (from the Application
+# Button's own bottom edge) is hardcoded here from that measurement instead
+# of computed from a uniform row height.
+_APP_MENU_ITEM_Y_OFFSETS = [21, 65, 108, 151, 198, 247, 295, 343]
 # Menu item order: New(0), Open...(1), Save(2), Save As...(3),
 # Firmware Update...(4), Print(5), Close(6), About(7)
 _APP_MENU_NEW_INDEX = 0
@@ -94,7 +102,7 @@ def load_test_file(app_obj):
     open_file_dialog(app_obj, TEST_FILE)
 
 
-def load_config_file(app_obj, config_path, close_existing=True):
+def load_config_file(app_obj, config_path, close_existing=True, wait_for_tree=True, tree_timeout=_NEW_CONFIG_TREE_TIMEOUT):
     """
     Open an arbitrary, previously-saved AccuMate config file (e.g.
     DefaultAL4.dat or a specific .AL4 file) via the same Open-file dialog
@@ -111,6 +119,14 @@ def load_config_file(app_obj, config_path, close_existing=True):
     the app itself - see close_current_file), then opens the requested file
     in the same app instance. Pass `close_existing=False` to skip this (e.g.
     if a caller already knows nothing is open).
+
+    By default (`wait_for_tree=True`) this also polls for the Config
+    Directory tree to populate before returning - like new_config_file, the
+    loaded document attempts its own device connection using its baked-in
+    comm settings before the tree/list views populate, so a caller that
+    immediately navigates the tree right after this returns can otherwise
+    hit a real "tree node not found" race. Pass `wait_for_tree=False` to
+    skip this (e.g. a caller that only cares about the Open dialog itself).
     """
     config_path = os.path.normpath(config_path)
 
@@ -121,6 +137,19 @@ def load_config_file(app_obj, config_path, close_existing=True):
         close_current_file(app_obj)
 
     open_file_dialog(app_obj, config_path)
+
+    if wait_for_tree:
+        start = time.time()
+        while time.time() - start < tree_timeout:
+            try:
+                if get_tree(app_obj).roots():
+                    return
+            except Exception:
+                pass
+            time.sleep(1)
+        raise RuntimeError(
+            f"Config Directory tree did not populate within {tree_timeout}s after loading {config_path}"
+        )
 
 
 def _click_app_menu_item(app_obj, item_index):
@@ -142,7 +171,7 @@ def _click_app_menu_item(app_obj, item_index):
     btn_rect = app_button.rectangle()
 
     x = (btn_rect.left - win_rect.left) + _APP_MENU_ITEM_X_OFFSET
-    y = (btn_rect.bottom - win_rect.top) + _APP_MENU_FIRST_ITEM_Y_OFFSET + item_index * _APP_MENU_ITEM_ROW_HEIGHT
+    y = (btn_rect.bottom - win_rect.top) + _APP_MENU_ITEM_Y_OFFSETS[item_index]
 
     win.click_input(coords=(x, y))
 
@@ -185,7 +214,10 @@ def new_config_file(app_obj, timeout=_NEW_CONFIG_TREE_TIMEOUT):
     )
 
 
-def close_current_file(app_obj):
+_ABOUT_DIALOG_TITLE_RE = ".*[Aa]bout.*AccuMate.*"
+
+
+def close_current_file(app_obj, retries=3):
     """
     Close the currently-open AccuMate document via the Application Button's
     "Close" menu item - WITHOUT closing the application itself - so a
@@ -194,10 +226,49 @@ def close_current_file(app_obj):
     modified, Close can pop a "save changes?" confirmation dialog first;
     that's answered "No" here, since an automated test run should never
     silently persist in-app changes back over a saved config file.
+
+    Retries a few times: live testing (right after a fresh app launch)
+    showed the coordinate-based click can land one row low, on "About"
+    (item_index=7) instead of "Close" (item_index=6) - opening the About
+    dialog instead, which then blocks the main frame ("enabled" check
+    fails) and hangs any subsequent call forever. This is detected here
+    (About dialog title match) and recovered from by closing it and
+    retrying the Close click, rather than letting it hang.
     """
-    print("[STEP] Opening Application menu -> Close (current document only)")
-    _click_app_menu_item(app_obj, _APP_MENU_CLOSE_INDEX)
-    time.sleep(0.5)
+    last_error = None
+
+    for attempt in range(1, retries + 1):
+        print("[STEP] Opening Application menu -> Close (current document only)")
+        _click_app_menu_item(app_obj, _APP_MENU_CLOSE_INDEX)
+        time.sleep(0.5)
+
+        try:
+            about_dlg_spec = app_obj.app.window(
+                title_re=_ABOUT_DIALOG_TITLE_RE, class_name="#32770"
+            )
+            if about_dlg_spec.exists(timeout=1):
+                print(
+                    f"[WARN] Attempt {attempt}/{retries}: Close menu click landed on "
+                    "'About' instead - dismissing and retrying"
+                )
+                last_error = RuntimeError("Application menu click landed on 'About' dialog")
+                try:
+                    about_dlg_spec.wrapper_object().close()
+                except Exception:
+                    try:
+                        app_obj.get_window().type_keys("{ESC}")
+                    except Exception:
+                        pass
+                time.sleep(0.5)
+                continue
+        except Exception:
+            pass
+
+        break
+    else:
+        raise RuntimeError(
+            f"Failed to close current document after {retries} attempts (kept landing on 'About')"
+        ) from last_error
 
     try:
         confirm_dlg_spec = app_obj.app.window(

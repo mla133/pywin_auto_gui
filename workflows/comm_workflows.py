@@ -35,10 +35,28 @@ def open_communications_settings(app_obj, retries=2):
     file, the main window can still be settling (e.g. finishing its initial
     "Attempting to connect..." dialog) and the very first ribbon click can be
     missed.
+
+    Each attempt first checks whether the dialog is ALREADY open before
+    clicking the ribbon again (confirmed live: the main frame reports
+    enabled=False whenever this dialog is open, so a naive retry loop that
+    always starts with `app_obj.get_window()` - which waits for the main
+    frame to be enabled - can get stuck forever on retry if a *previous*
+    attempt's ribbon click actually succeeded and opened the dialog, but the
+    wait() that confirms it raised for an unrelated transient reason. Without
+    this check, that leaves the dialog genuinely open with no way to ever
+    re-click "Document Options" - accepting/short-circuiting on an
+    already-open dialog avoids that self-defeating retry pattern).
     """
     last_error = None
 
     for attempt in range(1, retries + 1):
+        try:
+            existing = app_obj.app.window(title=_COMM_DIALOG_TITLE, class_name=_COMM_DIALOG_CLASS)
+            if existing.exists(timeout=1):
+                return existing.wrapper_object()
+        except Exception:
+            pass
+
         try:
             win = app_obj.get_window()
             win.set_focus()
@@ -143,6 +161,79 @@ def close_communications_settings(dlg, accept=True):
     """Close the Communications Settings dialog, committing changes if accept=True."""
     control_id = _OK_BUTTON_ID if accept else 2  # 2 == IDCANCEL
     _find_by_control_id(dlg, control_id).click_input()
+
+
+def wait_for_warning_dialog(app_obj, timeout=5, exclude_title=_COMM_DIALOG_TITLE):
+    """
+    Poll for any NEW top-level "#32770" message-box-style dialog other than
+    the Communications Settings dialog itself (e.g. the "Arm Address 1
+    cannot be 0" warning triggered by set_arm_address(dlg, 1, 0) - see A9).
+    Returns the dialog's win32 wrapper if one appears within `timeout`
+    seconds, or None otherwise. Doesn't assume any specific title/text,
+    since the exact wording of these AccuMate warnings hasn't been
+    confirmed live yet - callers should print/inspect `.window_text()` of
+    the dialog and any static text descendants to see the real message.
+    """
+    start = time.time()
+
+    while time.time() - start < timeout:
+        try:
+            for w in app_obj.app.windows(class_name=_COMM_DIALOG_CLASS):
+                title = w.window_text()
+                if title and title != exclude_title:
+                    return w
+        except Exception:
+            pass
+
+        time.sleep(0.3)
+
+    return None
+
+
+def dismiss_dialog(dlg, prefer_text=("OK",)):
+    """
+    Click the first Button descendant whose text matches one of
+    `prefer_text` (case-insensitive substring). Falls back to control_id 1
+    (the conventional IDOK) for classic #32770 message boxes, and finally to
+    the first Button descendant found at all - confirmed live that not
+    every warning here is a classic MessageBox (e.g. the Arm 2 = 0 warning
+    is a modern "Dialog"-class window with no numeric IDOK control_id, so
+    the control_id fallback alone isn't sufficient).
+    """
+    for wanted in prefer_text:
+        for ctrl in dlg.descendants(class_name="Button"):
+            try:
+                if wanted.lower() in ctrl.window_text().lower():
+                    ctrl.click_input()
+                    return
+            except Exception:
+                continue
+
+    try:
+        _find_by_control_id(dlg, _OK_BUTTON_ID).click_input()
+        return
+    except Exception:
+        pass
+
+    buttons = dlg.descendants(class_name="Button")
+    if buttons:
+        buttons[0].click_input()
+        return
+
+    # No Button descendants at all - matches this codebase's established
+    # pattern for custom-drawn/non-automatable popups (e.g. the ribbon
+    # Application Button's backstage menu). Fall back to a keystroke, which
+    # DOES work for at least some of these even when clicking doesn't apply
+    # (unlike the Application Button menu, where {DOWN} silently closed it -
+    # confirm {ENTER} actually dismisses this specific dialog live).
+    try:
+        dlg.set_focus()
+        dlg.type_keys("{ENTER}")
+        return
+    except Exception:
+        pass
+
+    raise RuntimeError(f"Could not find a button to dismiss dialog {dlg.window_text()!r}")
 
 
 def configure_ip_and_connect(app_obj, ip_address, timeout=15, arm_addresses=None):
