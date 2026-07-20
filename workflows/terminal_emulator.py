@@ -107,12 +107,22 @@ def send_command(win, command, settle_time=2.0):
     time.sleep(settle_time)
 
 
-def wait_for_progress_dialog_to_close(app_obj, timeout=400, poll_interval=2.0, appear_timeout=15):
+def wait_for_progress_dialog_to_close(
+    app_obj, timeout=400, poll_interval=2.0, appear_timeout=15,
+    title_substrings=("Writing data", "Downloading"),
+):
     """
     Wait for the "Writing data in <config> to <device> [NN%]" / "Downloading
     data..." progress window (shown by PUSH/PULL while transferring config
     data to/from the AccuLoad) to close, indicating the transfer has
     finished.
+
+    `title_substrings` defaults to the PUSH/PULL wording above, but any
+    other same-shaped, percentage-counting progress window (confirmed live:
+    the "Migrating AccuMate Configuration... [NN%]" window shown when
+    opening an old-format config file behaves identically - dynamic window
+    class, title-carried percentage, closes on completion) can reuse this
+    function by passing its own title substring(s) instead.
 
     IMPORTANT: this window is NOT a standard "#32770" common dialog - live
     probing (via a Desktop window-enumeration monitor watching a real PUSH
@@ -168,7 +178,7 @@ def wait_for_progress_dialog_to_close(app_obj, timeout=400, poll_interval=2.0, a
                 if w.process_id() != pid or not w.is_visible():
                     continue
                 title = w.window_text()
-                if "Writing data" in title or "Downloading" in title:
+                if any(sub in title for sub in title_substrings):
                     return True
             except Exception:
                 continue

@@ -1,5 +1,6 @@
 import time
 import os
+import re
 from pywinauto.keyboard import send_keys
 from pywinauto import Application
 
@@ -53,6 +54,119 @@ _SAVE_AS_DIALOG_TITLE = "Save As"
 _SAVE_AS_DIALOG_CLASS = "#32770"
 _SAVE_AS_FILENAME_AUTO_ID = "1001"
 _SAVE_AS_SAVE_BUTTON_AUTO_ID = "1"
+
+# Loading an old-format .AL4 (created with an earlier AccuMate version)
+# triggers a real, confirmed-live migration flow:
+#   1. A notice dialog (title "AccuMate", #32770) - "This configuration was
+#      saved with an old version of AccuMate and will be updated to the
+#      X.Y.Z version now." - OK dismisses it and starts the migration.
+#   2. A "Migrating AccuMate Configuration... [NN%]" progress window (same
+#      dynamic-class/title-carries-percentage shape as the PUSH/PULL
+#      progress window - see terminal_emulator.wait_for_progress_dialog_to_close)
+#      counts up, then closes.
+#   3. A completion dialog (title "AccuMate", #32770) - "The opened AccuMate
+#      IV configuration was successfully updated.\n\nA new file named
+#      '<name>' was created in the same directory as the original file." -
+#      OK dismisses it. The ORIGINAL document view is then closed (blank,
+#      no tree/tabs) - the migrated file is saved to disk but NOT
+#      automatically reopened, so a caller needs to explicitly open it
+#      (e.g. via load_config_file) to inspect/verify the converted config.
+_MIGRATION_DIALOG_TITLE = "AccuMate"
+_MIGRATION_DIALOG_CLASS = "#32770"
+_MIGRATION_NOTICE_TEXT = "old version of AccuMate"
+_MIGRATION_PROGRESS_TITLE_SUBSTRING = "Migrating AccuMate Configuration"
+_MIGRATION_COMPLETE_TEXT_RE = r"new file named '([^']+)'"
+
+
+def _click_button_by_title(dlg, title):
+    """
+    Click a Button descendant matching `title` on an already-resolved
+    dialog wrapper (child_window() only exists on WindowSpecification, not
+    a resolved wrapper's return value - see project conventions/comments
+    elsewhere in this file - so this scans .descendants() and matches
+    manually instead).
+    """
+    for ctrl in dlg.descendants(class_name="Button"):
+        try:
+            if ctrl.window_text() == title:
+                ctrl.click_input()
+                return
+        except Exception:
+            continue
+    raise RuntimeError(f"Could not find a '{title}' button on dialog {dlg.window_text()!r}")
+
+
+def load_and_migrate_old_config_file(app_obj, config_path, close_existing=True, migration_timeout=120):
+    """
+    Open an old-format .AL4 config file (created with an earlier AccuMate
+    version) and drive the real migration flow described above to
+    completion, returning the full path to the newly-created, migrated
+    file (same directory as `config_path`, named per the completion
+    dialog's own message).
+
+    Does NOT wait for the Config Directory tree afterward (unlike
+    load_config_file) - live testing confirmed the original document view
+    closes once migration completes, so there's no tree to wait for; open
+    the returned migrated path (e.g. via load_config_file) to inspect it.
+
+    Raises RuntimeError if the expected notice/completion dialogs, or the
+    migrated filename within the completion dialog's message, aren't found.
+    """
+    from workflows.terminal_emulator import wait_for_progress_dialog_to_close
+
+    config_path = os.path.normpath(config_path)
+
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"AccuMate config file not found: {config_path}")
+
+    if close_existing:
+        close_current_file(app_obj)
+
+    open_file_dialog(app_obj, config_path)
+
+    print("[STEP] Waiting for old-version migration notice dialog")
+    notice_dlg_spec = app_obj.app.window(title=_MIGRATION_DIALOG_TITLE, class_name=_MIGRATION_DIALOG_CLASS)
+    notice_dlg_spec.wait("exists visible ready", timeout=migration_timeout)
+    notice_dlg = notice_dlg_spec.wrapper_object()
+
+    notice_text = " ".join(s.window_text() for s in notice_dlg.descendants(class_name="Static"))
+    if _MIGRATION_NOTICE_TEXT not in notice_text:
+        raise RuntimeError(
+            f"Expected an old-version migration notice dialog, got unrecognized text: {notice_text!r}"
+        )
+
+    print(f"[INFO] Migration notice: {notice_text!r}")
+    _click_button_by_title(notice_dlg, "OK")
+
+    print("[STEP] Waiting for the 'Migrating AccuMate Configuration' progress window to close")
+    completed = wait_for_progress_dialog_to_close(
+        app_obj, timeout=migration_timeout, title_substrings=(_MIGRATION_PROGRESS_TITLE_SUBSTRING,)
+    )
+    if not completed:
+        raise RuntimeError(
+            f"Migration did not complete within {migration_timeout}s (progress window still open)"
+        )
+
+    print("[STEP] Waiting for migration completion dialog")
+    complete_dlg_spec = app_obj.app.window(title=_MIGRATION_DIALOG_TITLE, class_name=_MIGRATION_DIALOG_CLASS)
+    complete_dlg_spec.wait("exists visible ready", timeout=migration_timeout)
+    complete_dlg = complete_dlg_spec.wrapper_object()
+
+    complete_text = " ".join(s.window_text() for s in complete_dlg.descendants(class_name="Static"))
+    match = re.search(_MIGRATION_COMPLETE_TEXT_RE, complete_text)
+    if not match:
+        raise RuntimeError(
+            f"Could not find migrated filename in completion dialog text: {complete_text!r}"
+        )
+
+    migrated_filename = match.group(1)
+    migrated_path = os.path.join(os.path.dirname(config_path), migrated_filename)
+
+    print(f"[INFO] Migration completed: {migrated_path}")
+    _click_button_by_title(complete_dlg, "OK")
+    time.sleep(0.5)
+
+    return migrated_path
 
 def open_file_dialog(app_obj, file_path):
     win = app_obj.get_window()

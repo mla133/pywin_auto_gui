@@ -42,7 +42,7 @@ h4. A3: Loading Current Al4 Config Files
 
 h4. A4: Loading Old AL4 Config Files
 
-1. A file C254_AL4_v0_4.AL4 is provided, which was created with Accuload0.4. Load this file, or proceed with steps 2-9 below.
+1. A file 0-10.AL4 is provided (in configs/), which was created with Accuload0.4. Load this file, or proceed with steps 2-9 below.
     Expected Result: _Expected Result File is loaded, or created with steps 2-9 below._ *[PASS/FAIL]*
 
 2. Open the AccuMate 4 v0.10 Application.
@@ -123,7 +123,7 @@ Recipe 02 -> Change Recipe Name to "R2"
 
 h4. A5: Loading A3X Config Files
 
-1. Load the provided C255.A3X file, or follow steps 2-6 below.
+1. Load the provided 11-25.A3X file (in configs/), or follow steps 2-6 below.
     Expected Result: _Expected Result C255.A3X file exists_ *[PASS/FAIL]*
 
 2. Start the Accumate 3 application.
