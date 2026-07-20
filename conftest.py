@@ -21,12 +21,18 @@ DEFAULT_ACCUMATE_CONFIG_FILE = os.path.normpath(
 DEFAULT_ACCUMATE_DEVICE_IP = "10.55.66.70"
 
 # Default per-arm Communications Addresses (Arm 1..6) that match the real
-# AccuLoad device at DEFAULT_ACCUMATE_DEVICE_IP. A blank/new AccuMate config
-# defaults these to 1, 2, 3, 4, 5, 6, which does NOT match this device and
-# causes the connection attempt to fail/time out even though the IP itself
-# is reachable - confirmed live: connection only succeeds after setting
-# these to the device's actual configured addresses.
-DEFAULT_ACCUMATE_ARM_ADDRESSES = [11, 22, 33, 44, 5, 6]
+# AccuLoad device at DEFAULT_ACCUMATE_DEVICE_IP right now. NOTE: this was
+# previously [11, 22, 33, 44, 5, 6], but a later disruptive "Push All to
+# AccuLoad" run reset the device's own arm addressing back to the plain
+# defaults (confirmed live: DefaultAL4.dat, which bakes in 1, 2, 3, 4, 5, 6,
+# now connects successfully, while the old [11, 22, 33, 44, 5, 6] values no
+# longer match and cause every blank/new-config connection attempt to
+# fail/time out even though the IP itself is reachable). Same root class of
+# bug as the IP/Netmask/Gateway reset documented on test_a19_terminal_push_
+# command and test_a10 - if a future disruptive push changes these again,
+# update this list to match whatever DefaultAL4.dat's own addresses connect
+# with.
+DEFAULT_ACCUMATE_ARM_ADDRESSES = [1, 2, 3, 4, 5, 6]
 
 
 

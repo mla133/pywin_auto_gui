@@ -11,8 +11,41 @@ from workflows.comm_workflows import (
     dismiss_dialog,
 )
 from workflows.totalizers import retrieve_totalizers
+from workflows.accuload_web import AccuLoadWebSession
 
 DEVICE_CONNECT_TIMEOUT = 15
+
+
+def _with_web_session_retry(device_ip, action, attempts=3, delay=5):
+    """
+    Open an AccuLoadWebSession and run `action(web)`, retrying the whole
+    open+action if it raises. Necessary because right after AccuMate
+    completes a Push/Pull, the device's own web server can be briefly
+    unavailable or mid-transition (confirmed live: an immediate web-session
+    open right after a push intermittently hits a dead ChromeDriver
+    connection or a page still settling into a state where an expected
+    element hasn't rendered yet) - a short retry with a settling delay
+    absorbs that instead of failing on a race condition that has nothing to
+    do with whether the actual push/pull data transfer worked.
+    """
+    import time as _time
+
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with AccuLoadWebSession(device_ip=device_ip) as web:
+                return action(web)
+        except AssertionError:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            print(f"[WARN] Web session attempt {attempt}/{attempts} failed: {exc!r}")
+            _time.sleep(delay)
+
+    raise RuntimeError(
+        f"Could not open/verify the AccuLoad's own web UI at {device_ip} after {attempts} attempts"
+    ) from last_exc
+
 
 
 def _connect_new_config(app, device_ip, device_arm_addresses):
@@ -206,13 +239,41 @@ def test_a10_pushing_full_configuration(app, config_file, device_ip, device_arm_
     print("[STEP] Waiting for the PUSH progress dialog to complete")
     completed = wait_for_progress_dialog_to_close(app, timeout=450)
     assert completed, "Push All to AccuLoad did not complete within the expected timeout"
-    assert app.is_device_connected(), "Expected AccuMate to still be connected after Push All completes"
-
-    pytest.skip(
-        "AccuMate-side push mechanics verified above. Web-UI verification of the pushed "
-        "'Pulse In 1' value and IP/Netmask/Gateway on the AccuLoad's own web HMI (regression.md "
-        "steps 7-10) needs live element-ID discovery first - see phase3-a7-a14-web-hmi todo."
+    # Give the device a grace period to reconnect before failing outright, but this
+    # is EXPECTED to genuinely fail (confirmed live): Push All overwrites the
+    # device's real IP/netmask/gateway with the pushed config's own comm-settings
+    # section, so it stops responding at device_ip entirely - not a transient delay.
+    assert app.wait_for_device_connection(timeout=30), (
+        "Expected AccuMate to still be connected after Push All completes"
     )
+
+    print("[STEP] Verifying the pushed values on the AccuLoad's own web UI")
+    from workflows.accuload_web import get_pulse_input_tag, get_ip_netmask_gateway
+
+    def _verify_a10(web):
+        pulse_in_1_tag = get_pulse_input_tag(web.ui, 1)
+        print(f"[INFO] Device web UI Pulse In 1 tag: {pulse_in_1_tag!r}")
+        assert pulse_in_1_tag == "A10TEST", (
+            f"Expected the pushed 'Pulse In 1' tag to read 'A10TEST' on the AccuLoad's own "
+            f"web UI, got {pulse_in_1_tag!r}"
+        )
+
+        ip, netmask, gateway = get_ip_netmask_gateway(web.ui)
+        print(f"[INFO] Device web UI IP/Netmask/Gateway after push: {ip} / {netmask} / {gateway}")
+        # NOTE (confirmed live, same root cause as test_a19_terminal_push_command):
+        # "Push All to AccuLoad" overwrites these with defaults from the pushed
+        # config's own comm-settings section rather than leaving the device's
+        # actual comm settings alone - regression.md's step 10 expects them to
+        # "match the AccuMate configuration" (i.e. still equal device_ip), so
+        # this assertion is expected to genuinely FAIL here, documenting that
+        # real, already-known disruptive bug rather than masking it.
+        assert ip == device_ip, (
+            f"Expected the device's own IP Address to still read {device_ip!r} after Push All "
+            f"(per regression.md step 10), got {ip!r} - this is the known disruptive side effect "
+            "where Push All overwrites IP/Netmask/Gateway to the pushed config's own defaults."
+        )
+
+    _with_web_session_retry(device_ip, _verify_a10)
 
 
 @pytest.mark.requires_device
@@ -221,32 +282,57 @@ def test_a11_pulling_full_configuration(app, device_ip, device_arm_addresses):
     A11: Pulling Full Configurations.
 
     This scenario's precondition (change several values on the AccuLoad's
-    OWN web UI first) requires the same not-yet-discovered web element IDs
-    as A10's verification, so it can't be set up automatically yet. This
-    test instead exercises the AccuMate-side "Pull All from AccuLoad"
+    OWN web UI first, via its dropdown/picker widgets and a "Save and Exit")
+    isn't automated yet - it needs further live discovery of how this UI's
+    dropdown picker widgets are driven (a different interaction pattern
+    than the plain numeric/text keypad already supported), which risks
+    permanently altering the device's live configuration if done wrong, so
+    it's deliberately not attempted here.
+
+    Instead, this test exercises the AccuMate-side "Pull All from AccuLoad"
     mechanics against whatever the device's current configuration already
-    is, confirming the pull completes and AccuMate stays connected - it
-    does not (yet) assert that any specific value change was pulled down.
+    is, then cross-checks (read-only, non-mutating on both sides) that the
+    "Pulse In 01" -> "Pulse Input Tag" value AccuMate just pulled down
+    actually matches what the AccuLoad's own web UI shows for "Pulse In 1"
+    right now - a genuine (if partial) automated verification that the pull
+    mechanism transfers real data correctly, without needing the full
+    web-UI setup precondition.
     """
     from workflows.terminal_emulator import wait_for_progress_dialog_to_close
     from controls.ribbon_controls import click_ribbon_button
+    from pages.main_page import MainPage
+    from workflows.accuload_web import get_pulse_input_tag
 
     _connect_new_config(app, device_ip, device_arm_addresses)
 
-    print("[STEP] Clicking ribbon 'Pull All from AccuLoad'")
+    print("[STEP] Clicking ribbon 'Pull All From AccuLoad'")
     uia_win = app.get_uia_window()
-    click_ribbon_button(uia_win, "Pull All from AccuLoad")
+    click_ribbon_button(uia_win, "Pull All From AccuLoad")
 
     print("[STEP] Waiting for the PULL progress dialog to complete")
     completed = wait_for_progress_dialog_to_close(app, timeout=450)
     assert completed, "Pull All from AccuLoad did not complete within the expected timeout"
-    assert app.is_device_connected(), "Expected AccuMate to still be connected after Pull All completes"
+    # NOTE: this will fail if the device is currently in the corrupted network state
+    # left over from A10/A19's known disruptive Push-All bug (IP/netmask/gateway
+    # reset away from device_ip) - not a bug in the Pull itself. If this fails,
+    # confirm the device is still reachable at device_ip before investigating further.
+    assert app.wait_for_device_connection(timeout=30), (
+        "Expected AccuMate to still be connected after Pull All completes"
+    )
 
-    pytest.skip(
-        "AccuMate-side pull mechanics verified above. Setting up/verifying the specific "
-        "'Arm 1 Configuration', 'Pulse Input Tag', and 'Permissive 1 Sense' value changes on "
-        "the AccuLoad's own web HMI (regression.md steps 3-13, 16-18) needs live element-ID "
-        "discovery first - see phase3-a7-a14-web-hmi todo."
+    print("[STEP] Cross-checking pulled 'Pulse In 01' -> 'Pulse Input Tag' against the device's own web UI")
+    page = MainPage(app, request=None)
+    page.test_name = "test_a11_pulling_full_configuration"
+    page.select_tree_path(["Config Directory", "Pulse Inputs", "Pulse In 01"])
+    accumate_tag = page.get_value("Pulse Input Tag")
+    print(f"[INFO] AccuMate's pulled Pulse In 01 tag: {accumate_tag!r}")
+
+    device_tag = _with_web_session_retry(device_ip, lambda web: get_pulse_input_tag(web.ui, 1))
+
+    print(f"[INFO] Device web UI's own Pulse In 1 tag: {device_tag!r}")
+    assert accumate_tag == device_tag, (
+        f"Expected AccuMate's pulled 'Pulse Input Tag' ({accumate_tag!r}) to match what the "
+        f"AccuLoad's own web UI currently shows for 'Pulse In 1' ({device_tag!r}) after Pull All"
     )
 
 
@@ -304,11 +390,26 @@ def test_a12_pushing_selected_configuration(app, device_ip, device_arm_addresses
     assert completed, "Push Selected to AccuLoad did not complete within the expected timeout"
     assert app.is_device_connected(), "Expected AccuMate to still be connected after Push Selected completes"
 
-    pytest.skip(
-        "AccuMate-side selective-push mechanics verified above. Web-UI verification that "
-        "System Layout was updated but Digital Input 1 was NOT (regression.md steps 9-11) "
-        "needs live element-ID discovery first - see phase3-a7-a14-web-hmi todo."
-    )
+    print("[STEP] Verifying System Layout was updated but Digital Input 1 was NOT, on the AccuLoad's own web UI")
+    from workflows.accuload_web import get_number_of_load_arms, get_digital_input_tag
+
+    def _verify_a12(web):
+        num_load_arms = get_number_of_load_arms(web.ui)
+        print(f"[INFO] Device web UI Number of Load Arms: {num_load_arms!r}")
+        assert num_load_arms == "2", (
+            f"Expected the pushed 'Number of Load Arms' to read '2' on the AccuLoad's own web "
+            f"UI (regression.md step 10), got {num_load_arms!r}"
+        )
+
+        dig_in_1_tag = get_digital_input_tag(web.ui, 1)
+        print(f"[INFO] Device web UI Digital Input 1 tag: {dig_in_1_tag!r}")
+        assert dig_in_1_tag != "A12TEST", (
+            "Expected the Digital Input 1 tag change ('A12TEST') to NOT have been pushed up "
+            "(only 'System Layout' was selected for the push, per regression.md step 11), but "
+            f"the device's own web UI shows it was: {dig_in_1_tag!r}"
+        )
+
+    _with_web_session_retry(device_ip, _verify_a12)
 
 
 @pytest.mark.requires_device
@@ -317,14 +418,19 @@ def test_a13_pulling_selected_configuration(app, device_ip, device_arm_addresses
     A13: Pulling Selected Configurations.
 
     This scenario's precondition (change Pulse Input/Output values on the
-    AccuLoad's OWN web UI first) requires the same not-yet-discovered web
-    element IDs as A10/A11. This test instead exercises the AccuMate-side
-    "Pull Selected from AccuLoad" mechanics: open a new config, connect,
-    select just "Pulse Inputs", and confirm a selective pull completes.
+    AccuLoad's OWN web UI first, via its dropdown/picker widgets) isn't
+    automated yet for the same reason documented on A11 - discovering and
+    driving this UI's dropdown pickers safely needs more work. This test
+    instead exercises the AccuMate-side "Pull Selected from AccuLoad"
+    mechanics: open a new config, connect, select just "Pulse Inputs", pull,
+    then cross-checks (read-only) that AccuMate's pulled "Pulse In 01" tag
+    matches the AccuLoad's own web UI right now, confirming the selective
+    pull actually transferred real Pulse Input data.
     """
     from workflows.terminal_emulator import wait_for_progress_dialog_to_close
     from controls.ribbon_controls import click_ribbon_button, is_ribbon_button_enabled
     from pages.main_page import MainPage
+    from workflows.accuload_web import get_pulse_input_tag
 
     _connect_new_config(app, device_ip, device_arm_addresses)
 
@@ -345,11 +451,18 @@ def test_a13_pulling_selected_configuration(app, device_ip, device_arm_addresses
     assert completed, "Pull Selected from AccuLoad did not complete within the expected timeout"
     assert app.is_device_connected(), "Expected AccuMate to still be connected after Pull Selected completes"
 
-    pytest.skip(
-        "AccuMate-side selective-pull mechanics verified above. Setting up 'Pulse Input "
-        "Function'/'Pulse Output Tag' changes on the AccuLoad's own web HMI first, and "
-        "verifying only Pulse Inputs (not Outputs) were pulled (regression.md steps 3-13), "
-        "needs live element-ID discovery first - see phase3-a7-a14-web-hmi todo."
+    print("[STEP] Cross-checking pulled 'Pulse In 01' -> 'Pulse Input Tag' against the device's own web UI")
+    page.select_tree_path(["Config Directory", "Pulse Inputs", "Pulse In 01"])
+    accumate_tag = page.get_value("Pulse Input Tag")
+    print(f"[INFO] AccuMate's pulled Pulse In 01 tag: {accumate_tag!r}")
+
+    device_tag = _with_web_session_retry(device_ip, lambda web: get_pulse_input_tag(web.ui, 1))
+
+    print(f"[INFO] Device web UI's own Pulse In 1 tag: {device_tag!r}")
+    assert accumate_tag == device_tag, (
+        f"Expected AccuMate's pulled 'Pulse Input Tag' ({accumate_tag!r}) to match what the "
+        f"AccuLoad's own web UI currently shows for 'Pulse In 1' ({device_tag!r}) after the "
+        "selective 'Pulse Inputs' pull"
     )
 
 

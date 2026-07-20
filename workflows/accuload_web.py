@@ -46,6 +46,8 @@ import os
 import sys
 import time
 
+from selenium.webdriver.common.by import By
+
 # Local checkout of the internal Selenium API repo. Override via the
 # ACCULOAD_TOOLS_REPO env var if checked out elsewhere.
 INTERNAL_TOOLS_REPO = os.environ.get(
@@ -107,6 +109,22 @@ class AccuLoadWebSession:
         import UserInterfaceSeleniumAPI as ui  # noqa: N813 (external module's naming)
 
         self.ui = ui
+
+        # NOTE (confirmed live): `UserInterfaceSeleniumAPI` only creates its
+        # `driver` ONCE, as a module-level side effect the FIRST time it's
+        # imported in this process (`driver = create_driver()` at the bottom
+        # of the module) - Python caches imported modules in sys.modules, so
+        # every later `import UserInterfaceSeleniumAPI` in the same process
+        # (e.g. a second `AccuLoadWebSession` in the same test run, or a
+        # retry loop) returns that SAME cached module object, not a fresh
+        # one. Since `__exit__` below calls `self.ui.driver.quit()`, any
+        # session after the very first one in a process would otherwise
+        # reuse an already-quit driver and fail permanently (chromedriver's
+        # own local server is gone, "connection actively refused" for every
+        # subsequent attempt, forever, until the process restarts). Always
+        # create and (re)assign a genuinely fresh driver here instead of
+        # trusting the module-level one from import time.
+        self.ui.driver = self.ui.create_driver(mode=self.browser_mode)
         self.ui.driver.get(self.url)
 
         self._control_accuload()
@@ -237,4 +255,236 @@ def ensure_run_ready_mode(ui, timeout=5):
         print("[INFO] Backed out of a leftover Program Mode session via Cancel and Exit -> Yes")
     except TimeoutException:
         pass
+
+
+def _js_click(ui, elem_id, settle=1.5):
+    """
+    Shared navigation primitive for every helper below: click an element by
+    ID via JS (`execute_script`), not a native WebDriver `.click()`, with a
+    short settle delay and a fresh `find_element` right before the click.
+    Confirmed live (see this module's docstring/history) that native clicks
+    on this device's jQuery Mobile UI intermittently silently no-op or raise
+    ElementClickInterceptedException/StaleElementReferenceException while a
+    page transition is still binding handlers or replacing DOM nodes -
+    switching to a JS click plus this settle/refetch pattern reliably avoids
+    that class of flake for every element observed so far (overlay, popup,
+    breadcrumb, tile buttons, dropdown buttons).
+    """
+    driver = ui.driver
+    time.sleep(settle)
+    el = driver.find_element(By.ID, elem_id)
+    driver.execute_script("arguments[0].click();", el)
+    time.sleep(1)
+
+
+def _submit_program_mode_password_if_prompted(ui, password, timeout=3):
+    """
+    If entering Program Mode triggered the device's "Enter Password" popup
+    (`popupLogin`, initially `display:none` in the DOM on every screen -
+    only actually shown, per a live security-level check, after clicking
+    `btnProgramMode`), enter `password` and submit. Silently does nothing if
+    the popup never becomes visible within `timeout` seconds (i.e. no
+    password was required this time - confirmed live this varies with the
+    device's currently-configured security level).
+
+    The password field (`passwordPL`) is a hidden <input type="password">
+    with a shadow display div (`passwordPL-H`) - same "-H" pattern as the
+    read-only fields in `read_field()`. Rather than reverse-engineering
+    exactly which on-screen keypad widget this specific field uses (unlike
+    the numeric fields `enterNumericFieldValue` targets, this is a
+    password-type field, which may not use the same jQuery Mobile numeric
+    keyboard), the value is set directly via JS on the hidden input plus a
+    dispatched `input` event (so any bound handlers relying on that event
+    still fire), then mirrored onto the visible `-H` div, before clicking
+    Submit.
+    """
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import TimeoutException
+
+    driver = ui.driver
+
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.visibility_of_element_located((By.ID, "passwordPL-H"))
+        )
+    except TimeoutException:
+        return  # No password prompt appeared - nothing to do.
+
+    print("[INFO] Program Mode password prompt appeared - submitting configured passcode")
+    driver.execute_script(
+        """
+        var input = document.getElementById('passwordPL');
+        var display = document.getElementById('passwordPL-H');
+        input.value = arguments[0];
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        input.dispatchEvent(new Event('change', {bubbles: true}));
+        if (display) { display.textContent = arguments[0]; }
+        """,
+        str(password),
+    )
+    time.sleep(0.5)
+    _js_click(ui, "btnPasswordSubmit")
+
+
+def reset_to_program_mode(ui, password=None):
+    """
+    Reset navigation to the top-level Program Mode menu via its breadcrumb
+    (`breadCrumb1`), regardless of whatever sub-screen the device's web UI
+    is currently sitting on. Necessary because the physical device retains
+    whatever screen a PRIOR script/test session left it on - there is no
+    "start fresh" reload short of this breadcrumb click. Safe to call
+    unconditionally.
+
+    Handles two starting states:
+      - Currently on the outer "Main"/Index page, outside Program Mode
+        entirely (breadCrumb1's text reads "Main") - e.g. after a prior
+        session cleanly did "Save/Cancel and Exit" - JS-clicks
+        `btnProgramMode` to enter it first, then submits `password` (or, if
+        not given, the `ACCULOAD_PROGRAM_MODE_PASSWORD` env var - NEVER
+        hardcoded in source) if the device's "Enter Password" popup appears
+        - see `_submit_program_mode_password_if_prompted`. Whether this
+        popup appears at all depends on the device's currently-configured
+        security level, confirmed live to vary between sessions.
+      - Already inside Program Mode, whether sitting at its own top-level
+        menu or several screens deep (breadCrumb1's text is anything other
+        than "Main", e.g. "Program Mode", "Config", etc.) - JS-clicks
+        `breadCrumb1` itself, which always returns to the top of the CURRENT
+        breadcrumb trail (i.e. Program Mode's own top-level menu), regardless
+        of how deep the prior sub-screen was. No password needed here since
+        we're already inside.
+
+    Note `breadCrumb1` is present on EVERY screen of this UI (it's the
+    global breadcrumb trail, not something specific to Program Mode) -
+    confirmed live that checking only for its presence (an earlier version
+    of this function) is not enough to tell which of the two cases above
+    applies; its TEXT must be inspected instead.
+
+    Either way, waits for `btnConfig` to actually be present before
+    returning - confirmed live that `UserInterfaceSeleniumAPI`'s
+    `clickConfigButton()`/`clickSystemButton()`/etc. do a bare
+    `find_element()` with NO wait of their own, so calling them immediately
+    after a breadcrumb/menu-entry click (which triggers a jQuery Mobile page
+    transition that isn't instant) can raise NoSuchElementException even
+    though the button appears moments later - this wait is what makes every
+    get_* helper below reliable regardless of that transition's timing.
+    """
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+
+    driver = ui.driver
+
+    if password is None:
+        password = os.environ.get("ACCULOAD_PROGRAM_MODE_PASSWORD")
+
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "breadCrumb1")))
+    crumb_text = driver.find_element(By.ID, "breadCrumb1").text.strip()
+
+    if crumb_text == "Main":
+        # Outside Program Mode entirely - enter it first.
+        _js_click(ui, "btnProgramMode")
+        if password is not None:
+            _submit_program_mode_password_if_prompted(ui, password)
+    else:
+        # Already inside Program Mode somewhere - jump back to its top menu.
+        _js_click(ui, "breadCrumb1")
+
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "btnConfig")))
+
+
+def read_field(ui, field_id):
+    """
+    Generic read of a single field's displayed value by element ID. Most
+    read-only/numeric-display fields on this UI render as a shadow display
+    div named "<field_id>-H" (e.g. "ip_addr-H") holding the visible text,
+    with a same-named hidden <input> holding the raw value/attributes used
+    for editing - this reads the "-H" display div if present, falling back
+    to the plain element's own text (covers dropdown/button-style fields
+    like "arm1_config" or "permissive_1_type", which have no "-H" variant
+    and show their current value directly as the button's text).
+    """
+    driver = ui.driver
+    try:
+        return driver.find_element(By.ID, field_id + "-H").text.strip()
+    except Exception:
+        return driver.find_element(By.ID, field_id).text.strip()
+
+
+def get_number_of_load_arms(ui):
+    """Program Mode -> Config -> System Layout ("001 Number of Load Arms")."""
+    reset_to_program_mode(ui)
+    ui.clickConfigButton()
+    _js_click(ui, "Config-1")
+    return read_field(ui, "num_physical_arms")
+
+
+def get_pulse_input_tag(ui, pulse_in_number):
+    """
+    Program Mode -> Config -> Pulse Inputs -> Pulse In <N> ("1100 Pulse
+    Input Tag"). `pulse_in_number` is 1-based, matching the device's own
+    "Pulse In 1"/"Pulse In 2"/... numbering.
+    """
+    reset_to_program_mode(ui)
+    ui.clickConfigButton()
+    _js_click(ui, "btnPulseIn")
+    _js_click(ui, "btnPulseIn" + str(pulse_in_number))
+    return read_field(ui, "pulse_in_tag")
+
+
+def get_digital_input_tag(ui, digital_in_number):
+    """
+    Program Mode -> Config -> Digital Inputs -> Dig In <N> ("1300 Digital
+    Input Tag"). `digital_in_number` is 1-based.
+    """
+    reset_to_program_mode(ui)
+    ui.clickConfigButton()
+    _js_click(ui, "btnDigIn")
+    _js_click(ui, "btnDigIn" + str(digital_in_number))
+    return read_field(ui, "dig_in_tag")
+
+
+def get_arm_permissive_sense(ui, arm_number, permissive_number=1):
+    """
+    Program Mode -> Arms -> Arm <N> -> General Purpose ("101 Permissive 1
+    Sense" for permissive_number=1, "104 Permissive 2 Sense" for 2, etc).
+    Both `arm_number` and `permissive_number` are 1-based.
+    """
+    reset_to_program_mode(ui)
+    ui.clickArmsButton()
+    _js_click(ui, "btnArm" + str(arm_number))
+    _js_click(ui, "Arm-40")  # "100 General Purpose" category tile
+    return read_field(ui, "permissive_" + str(permissive_number) + "_type")
+
+
+def get_ip_netmask_gateway(ui):
+    """
+    Program Mode -> System -> Communications -> Host Interface ("735 IP
+    Address"/"736 Netmask"/"737 Gateway"). Returns a (ip, netmask, gateway)
+    tuple of strings. Scrolls the field list down first since Gateway sits
+    below the initial fold on this screen.
+    """
+    reset_to_program_mode(ui)
+    ui.clickSystemButton()
+    _js_click(ui, "btnComm")
+    _js_click(ui, "Comm-18")  # "700 Host Interface" category tile
+
+    # Gateway is below the visible fold - scroll the field list down a few
+    # times (each click advances one row) before reading any of these three
+    # fields, so all three are guaranteed to be rendered/attached.
+    driver = ui.driver
+    for _ in range(4):
+        try:
+            btn = driver.find_element(By.ID, "SelComm-scrollbtnDown")
+            driver.execute_script("arguments[0].click();", btn)
+            time.sleep(0.5)
+        except Exception:
+            break
+
+    return (
+        read_field(ui, "ip_addr"),
+        read_field(ui, "netmask"),
+        read_field(ui, "gateway"),
+    )
 
