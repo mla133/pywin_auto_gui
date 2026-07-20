@@ -3,6 +3,7 @@ import subprocess
 import os
 from datetime import datetime
 from app.application import AccuMateApp
+from workflows.accuload_web import AccuLoadWebSession
 
 # Fallback AccuMate config used when --accumate-config-file isn't passed. This
 # is the app's own DefaultAL4.dat, installed alongside the executable (also
@@ -67,6 +68,13 @@ def pytest_configure(config):
         "AccuLoad's IP/netmask/gateway to defaults) - excluded by default addopts, run "
         "explicitly with `-m disruptive` as part of a deliberate full regression pass.",
     )
+    config.addinivalue_line(
+        "markers",
+        "requires_device_web: marks tests that drive the AccuLoad device's own embedded "
+        "web HMI (via the internal Selenium API bridge in workflows/accuload_web.py), "
+        "as opposed to AccuMate's desktop app - needs both a reachable device and the "
+        "internal tools repo checked out (see ACCULOAD_TOOLS_REPO).",
+    )
 
 
 @pytest.fixture
@@ -97,6 +105,19 @@ def device_arm_addresses(request):
     """
     return DEFAULT_ACCUMATE_ARM_ADDRESSES
 
+
+
+@pytest.fixture
+def accuload_web(device_ip):
+    """
+    Yields an AccuLoadWebSession connected to the AccuLoad device's own web
+    HMI at `device_ip` (a real Chrome browser, driven via the internal
+    Selenium API). Used for regression sections that require checking/editing
+    values on the device's own UI (e.g. A7-A14), which AccuMate's desktop app
+    can't reach. Closes the browser on teardown regardless of test outcome.
+    """
+    with AccuLoadWebSession(device_ip=device_ip) as web:
+        yield web
 
 
 @pytest.fixture(scope="function")
