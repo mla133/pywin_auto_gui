@@ -1,9 +1,25 @@
 from controls.common_controls import get_list, get_tree, get_list_row_texts
 from controls.ribbon_controls import is_ribbon_button_enabled, click_ribbon_button
 from pywinauto.keyboard import send_keys
+from pywinauto import Application
 import time
 from datetime import datetime
 import os
+
+# "Edit Program Code Data" is the modal dialog opened by double-clicking a
+# SysListView32 row in a config directory view (e.g. "Number of Load Arms"
+# under System Layout) - distinct from the F2-inline-edit pattern used by
+# edit_value()/edit_dropdown_value() for plain listview cells. Its controls
+# are discovered via automation_id (win32 dialog control ids are stable
+# across runs, unlike UIA control_type/title which are ambiguous here - the
+# dialog has two Edit/ComboBox pairs, "Current" (read-only) and "New"
+# (editable), both with empty window_text()).
+_EDIT_DIALOG_TITLE = "Edit Program Code Data"
+_EDIT_DIALOG_CLASS = "#32770"
+_EDIT_DIALOG_NEW_VALUE_AUTO_ID = "1006"
+_EDIT_DIALOG_SECURITY_LEVEL_AUTO_ID = "1010"
+_EDIT_DIALOG_OK_AUTO_ID = "1"
+
 
 def auto_step(func):
     def wrapper(self, *args, **kwargs):
@@ -193,6 +209,56 @@ class MainPage:
 
 
     @auto_step
+    @auto_step
+    def set_dropdown_value_by_typeahead(self, target_text, first_letter):
+        """
+        Edit a listview row's in-place dropdown value using type-ahead
+        selection rather than the fragile relative-{UP}/{DOWN}-only
+        navigation in edit_dropdown_value() (which only knows fixed
+        mappings for two "Security Level" options). Opens the dropdown the
+        same way (double-click the value cell, {DOWN} to open it), then
+        types `first_letter` - standard Win32 combo/listbox controls jump to
+        the first item starting with that letter - and commits with
+        {ENTER}/{TAB}. Only safe to use when `first_letter` unambiguously
+        identifies the desired option (e.g. "n" for a single "Not Used"
+        entry in the option list) - confirmed live for Recipe Directory's
+        "Recipe Used" field ("Load Arm 1".."Load Arm 6", "Not Used").
+        """
+        lst = get_list(self.app)
+
+        row_index = None
+        for i in range(lst.item_count()):
+            row = get_list_row_texts(lst, i)
+            if any(target_text in t for t in row):
+                row_index = i
+                break
+
+        if row_index is None:
+            raise RuntimeError(f"{target_text} not found")
+
+        item = lst.get_item(row_index)
+        item.select()
+
+        rect = item.rectangle()
+        x = rect.left + 250
+        y = rect.top + rect.height() // 2
+        lst.click_input(coords=(x, y))
+        lst.click_input(coords=(x, y), double=True)
+        time.sleep(0.3)
+
+        send_keys("{DOWN}")
+        time.sleep(0.2)
+        send_keys(first_letter)
+        time.sleep(0.3)
+        send_keys("{ENTER}")
+        time.sleep(0.3)
+        send_keys("{TAB}")
+        time.sleep(0.5)
+
+        print(f"[INFO] Set '{target_text}' via type-ahead '{first_letter}'")
+        return row_index
+
+    @auto_step
     def edit_dropdown_value(self, target_text, target_option):
         lst = get_list(self.app)
 
@@ -249,6 +315,108 @@ class MainPage:
         time.sleep(0.2)
 
         print(f"[INFO] Selected dropdown value: {target_option}")
+
+        return row_index
+
+    @auto_step
+    def open_program_code_data_dialog(self, target_text):
+        """
+        Double-click a config directory row (e.g. "HM Class Product") to
+        open the "Edit Program Code Data" dialog WITHOUT editing/closing it
+        - used by context-help tests (A17) that need to click the dialog's
+        own "Help" button rather than set a value. Returns the dialog's
+        win32 wrapper; callers are responsible for closing it (e.g. via
+        Cancel, automation_id "2").
+        """
+        lst = get_list(self.app)
+
+        row_index = None
+        for i in range(lst.item_count()):
+            row = get_list_row_texts(lst, i)
+            if any(target_text in t for t in row):
+                row_index = i
+                break
+
+        if row_index is None:
+            raise RuntimeError(f"{target_text} not found")
+
+        print(f"[INFO] Opening 'Edit Program Code Data' dialog for row {row_index}")
+
+        item = lst.get_item(row_index)
+        item.select()
+
+        rect = item.rectangle()
+        VALUE_COLUMN_X_OFFSET = 250
+        x = rect.left + VALUE_COLUMN_X_OFFSET
+        y = rect.top + rect.height() // 2
+
+        lst.click_input(coords=(x, y))
+        lst.click_input(coords=(x, y), double=True)
+
+        dlg_spec = self.app.app.window(title=_EDIT_DIALOG_TITLE, class_name=_EDIT_DIALOG_CLASS)
+        dlg_spec.wait("exists visible ready", timeout=10)
+
+        return dlg_spec.wrapper_object()
+
+    @auto_step
+    def edit_program_code_data(self, target_text, new_value, security_level=None):
+        """
+        Double-click a config directory row (e.g. "Number of Load Arms") to
+        open the "Edit Program Code Data" dialog, set its "New" value, and
+        optionally its Security Level, then OK the dialog.
+
+        Returns the row index that was edited. Raises RuntimeError if the
+        dialog never appears (e.g. this row uses the plain inline-edit
+        pattern instead - see edit_value()).
+        """
+        lst = get_list(self.app)
+
+        row_index = None
+        for i in range(lst.item_count()):
+            row = get_list_row_texts(lst, i)
+            if any(target_text in t for t in row):
+                row_index = i
+                break
+
+        if row_index is None:
+            raise RuntimeError(f"{target_text} not found")
+
+        print(f"[INFO] Opening 'Edit Program Code Data' dialog for row {row_index}")
+
+        item = lst.get_item(row_index)
+        item.select()
+
+        rect = item.rectangle()
+        VALUE_COLUMN_X_OFFSET = 250
+        x = rect.left + VALUE_COLUMN_X_OFFSET
+        y = rect.top + rect.height() // 2
+
+        lst.click_input(coords=(x, y))
+        lst.click_input(coords=(x, y), double=True)
+
+        dlg_spec = self.app.app.window(title=_EDIT_DIALOG_TITLE, class_name=_EDIT_DIALOG_CLASS)
+        dlg_spec.wait("exists visible ready", timeout=10)
+
+        hwnd = dlg_spec.wrapper_object().handle
+        uia_app = Application(backend="uia").connect(handle=hwnd)
+        uia_dlg = uia_app.window(handle=hwnd)
+
+        new_value_edit = uia_dlg.child_window(auto_id=_EDIT_DIALOG_NEW_VALUE_AUTO_ID, control_type="Edit")
+        if not new_value_edit.exists():
+            raise RuntimeError("'New' value edit control not found in Edit Program Code Data dialog")
+
+        new_value_edit.set_edit_text(str(new_value))
+
+        if security_level is not None:
+            level_combo = uia_dlg.child_window(auto_id=_EDIT_DIALOG_SECURITY_LEVEL_AUTO_ID, control_type="ComboBox")
+            if not level_combo.exists():
+                raise RuntimeError("Security Level combo box not found in Edit Program Code Data dialog")
+            level_combo.select(security_level)
+
+        print(f"[INFO] Setting '{target_text}' New value to '{new_value}'")
+        uia_dlg.child_window(auto_id=_EDIT_DIALOG_OK_AUTO_ID, control_type="Button").click_input()
+
+        time.sleep(0.5)
 
         return row_index
 

@@ -4,6 +4,7 @@ from pywinauto.keyboard import send_keys
 from pywinauto import Application
 
 from controls.ribbon_controls import find_app_button
+from controls.common_controls import get_tree
 
 TEST_FILE = os.path.normpath(
     r"C:\\Users\\allenma\\Documents\\Testing\\Auto_Test.AL4"
@@ -20,8 +21,17 @@ _APP_MENU_FIRST_ITEM_Y_OFFSET = 27  # from button bottom, to the "New" item
 _APP_MENU_ITEM_ROW_HEIGHT = 52
 # Menu item order: New(0), Open...(1), Save(2), Save As...(3),
 # Firmware Update...(4), Print(5), Close(6), About(7)
+_APP_MENU_NEW_INDEX = 0
 _APP_MENU_SAVE_AS_INDEX = 3
 _APP_MENU_CLOSE_INDEX = 6
+
+# How long a brand-new document takes to populate its Config Directory tree.
+# Unlike opening a saved file, "New" creates a blank in-memory document that
+# immediately attempts a device connection using default comm settings
+# before the tree/list views populate - live testing showed this can take
+# ~20s (longer than the ~10-13s load_config_file delay), so new_config_file
+# polls rather than using a short fixed sleep.
+_NEW_CONFIG_TREE_TIMEOUT = 40
 
 # Seen when closing a document that AccuMate considers modified (e.g. after
 # a connection attempt touched in-memory state) - "&Yes"/"&No" match by
@@ -135,6 +145,44 @@ def _click_app_menu_item(app_obj, item_index):
     y = (btn_rect.bottom - win_rect.top) + _APP_MENU_FIRST_ITEM_Y_OFFSET + item_index * _APP_MENU_ITEM_ROW_HEIGHT
 
     win.click_input(coords=(x, y))
+
+
+def new_config_file(app_obj, timeout=_NEW_CONFIG_TREE_TIMEOUT):
+    """
+    Create a new, blank AccuMate Config File via the ribbon Application
+    Button's "New" menu item.
+
+    Unlike Save As/Print/Close, "New" doesn't have a fly-out list of
+    document types in this build - a single click directly creates a new
+    AccuMate Config File (live testing showed no hover/fly-out submenu
+    actually renders here), so this reuses the same coordinate-click
+    machinery as the other Application Button items.
+
+    The new document starts completely blank (title has no filename, tree
+    and list views report zero items) while AccuMate attempts an initial
+    device connection using default comm settings; the Config
+    Directory/System Directory/Arm N tree only populates once that settles
+    (observed up to ~20s), so this polls for the tree to report at least
+    one root node rather than assuming success immediately. Raises
+    RuntimeError if the tree never populates within `timeout` seconds.
+    """
+    print("[STEP] Opening Application menu -> New")
+    _click_app_menu_item(app_obj, _APP_MENU_NEW_INDEX)
+
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            tree = get_tree(app_obj)
+            if tree.roots():
+                print("[INFO] New AccuMate Config File created")
+                return
+        except Exception:
+            pass
+        time.sleep(1)
+
+    raise RuntimeError(
+        f"New AccuMate Config File did not populate its Config Directory tree within {timeout}s"
+    )
 
 
 def close_current_file(app_obj):

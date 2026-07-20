@@ -19,6 +19,15 @@ DEFAULT_ACCUMATE_CONFIG_FILE = os.path.normpath(
 # than just config-file loading.
 DEFAULT_ACCUMATE_DEVICE_IP = "10.55.66.70"
 
+# Default per-arm Communications Addresses (Arm 1..6) that match the real
+# AccuLoad device at DEFAULT_ACCUMATE_DEVICE_IP. A blank/new AccuMate config
+# defaults these to 1, 2, 3, 4, 5, 6, which does NOT match this device and
+# causes the connection attempt to fail/time out even though the IP itself
+# is reachable - confirmed live: connection only succeeds after setting
+# these to the device's actual configured addresses.
+DEFAULT_ACCUMATE_ARM_ADDRESSES = [11, 22, 33, 44, 5, 6]
+
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -51,6 +60,13 @@ def pytest_configure(config):
         "requires_device: marks tests that require a live, reachable AccuLoad device "
         "connection (auto-skipped at runtime if the configured device isn't reachable).",
     )
+    config.addinivalue_line(
+        "markers",
+        "disruptive: marks tests that mutate live device state in a way that can break "
+        "subsequent test runs (e.g. A19's PUSH command, confirmed live to reset the "
+        "AccuLoad's IP/netmask/gateway to defaults) - excluded by default addopts, run "
+        "explicitly with `-m disruptive` as part of a deliberate full regression pass.",
+    )
 
 
 @pytest.fixture
@@ -69,6 +85,18 @@ def config_file(request):
 @pytest.fixture
 def device_ip(request):
     return request.config.getoption("--accumate-device-ip") or DEFAULT_ACCUMATE_DEVICE_IP
+
+
+@pytest.fixture
+def device_arm_addresses(request):
+    """
+    Per-arm Communications Addresses matching the physical AccuLoad device
+    at `device_ip`, required for AccuMate to actually connect to it (see
+    DEFAULT_ACCUMATE_ARM_ADDRESSES for why this can't just use a blank
+    config's defaults).
+    """
+    return DEFAULT_ACCUMATE_ARM_ADDRESSES
+
 
 
 @pytest.fixture(scope="function")

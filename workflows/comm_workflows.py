@@ -11,6 +11,20 @@ _COMM_DIALOG_CLASS = "#32770"
 _IP_ADDRESS_CONTROL_ID = 1028   # SysIPAddress32
 _OK_BUTTON_ID = 1
 
+# "Communications Addresses:" Edit controls in the Communications Settings
+# dialog, one per arm (Arm 1 (Base) .. Arm 6), 1-indexed to match the UI
+# labels. Discovered via a live descendants() scan - each is a plain 'Edit'
+# control (not SysIPAddress32), default text is the arm number itself
+# (Arm 1 -> "1", Arm 2 -> "2", etc).
+_ARM_ADDRESS_CONTROL_IDS = {
+    1: 1030,
+    2: 1071,
+    3: 1072,
+    4: 1073,
+    5: 1074,
+    6: 1075,
+}
+
 
 def open_communications_settings(app_obj, retries=2):
     """
@@ -64,6 +78,11 @@ def _find_by_control_id(dlg, control_id):
     raise RuntimeError(f"Control with control_id={control_id} not found in dialog")
 
 
+def get_configured_ip(dlg):
+    """Read the current value of the IP Address field without changing it."""
+    return _find_by_control_id(dlg, _IP_ADDRESS_CONTROL_ID).window_text()
+
+
 def set_device_ip(dlg, ip_address):
     """
     Set the IP Address field (SysIPAddress32) in an already-open
@@ -87,23 +106,61 @@ def set_device_ip(dlg, ip_address):
         )
 
 
+def get_arm_address(dlg, arm_number):
+    """Read the current Communications Address for the given arm (1-6)."""
+    control_id = _ARM_ADDRESS_CONTROL_IDS[arm_number]
+    return _find_by_control_id(dlg, control_id).window_text()
+
+
+def set_arm_address(dlg, arm_number, address):
+    """
+    Set the Communications Address Edit field for a single arm (1-6) in an
+    already-open Communications Settings dialog.
+    """
+    control_id = _ARM_ADDRESS_CONTROL_IDS[arm_number]
+    ctrl = _find_by_control_id(dlg, control_id)
+    ctrl.click_input()
+    ctrl.type_keys("^a")  # select all
+    ctrl.type_keys(str(address))
+
+    actual = ctrl.window_text()
+    if str(address) != actual:
+        raise RuntimeError(
+            f"Failed to set Arm {arm_number} address: expected '{address}', got '{actual}'"
+        )
+
+
+def set_arm_addresses(dlg, addresses):
+    """
+    Set Communications Addresses for arms 1..len(addresses) in one pass.
+    `addresses` is a sequence of values applied in order (index 0 -> Arm 1).
+    """
+    for arm_number, address in enumerate(addresses, start=1):
+        set_arm_address(dlg, arm_number, address)
+
+
 def close_communications_settings(dlg, accept=True):
     """Close the Communications Settings dialog, committing changes if accept=True."""
     control_id = _OK_BUTTON_ID if accept else 2  # 2 == IDCANCEL
     _find_by_control_id(dlg, control_id).click_input()
 
 
-def configure_ip_and_connect(app_obj, ip_address, timeout=15):
+def configure_ip_and_connect(app_obj, ip_address, timeout=15, arm_addresses=None):
     """
     Configure AccuMate's device IP address and attempt a live connection:
 
       1. Open the Communications Settings dialog (Document Options ribbon
          button).
-      2. Set the IP Address field to `ip_address`.
-      3. Commit the dialog (OK).
-      4. Click the ribbon "Retry Comm" button to trigger a connection
+      2. Optionally set the per-arm Communications Addresses (see
+         set_arm_addresses) - a blank/new config's default addresses
+         (1, 2, 3, 4, 5, 6) may not match the physical AccuLoad's actual
+         configured arm addresses, in which case the connection attempt
+         below will fail/time out even though the IP itself is reachable.
+      3. Set the IP Address field to `ip_address`.
+      4. Commit the dialog (OK).
+      5. Click the ribbon "Retry Comm" button to trigger a connection
          attempt.
-      5. Poll AccuMateApp.is_device_connected() until it reports True or
+      6. Poll AccuMateApp.is_device_connected() until it reports True or
          `timeout` seconds elapse.
 
     Returns True if AccuMate reports a live connection within `timeout`
@@ -113,6 +170,8 @@ def configure_ip_and_connect(app_obj, ip_address, timeout=15):
     """
     print(f"[STEP] Opening Communications Settings, setting IP to {ip_address}")
     dlg = open_communications_settings(app_obj)
+    if arm_addresses is not None:
+        set_arm_addresses(dlg, arm_addresses)
     set_device_ip(dlg, ip_address)
     close_communications_settings(dlg, accept=True)
     time.sleep(0.5)
@@ -123,3 +182,4 @@ def configure_ip_and_connect(app_obj, ip_address, timeout=15):
 
     print(f"[STEP] Waiting up to {timeout}s for AccuMate to report a live connection")
     return app_obj.wait_for_device_connection(timeout=timeout)
+
