@@ -57,14 +57,20 @@ _APP_MENU_CLOSE_INDEX = 6
 _APP_MENU_NEW_FLYOUT_X_OFFSET = 150
 # Fly-out item y-offsets, relative to the Application Button's own bottom
 # edge (same coordinate space as _APP_MENU_ITEM_Y_OFFSETS) - measured from a
-# live screenshot of the "New" fly-out. Order confirmed live: "AccuMate
-# Config File" (0, taller row - has a two-line tooltip-style description
-# under it), "Translation" (1), "Equation Set" (2), "Driver Database" (3).
-_APP_MENU_NEW_FLYOUT_Y_OFFSETS = [21, 125, 177, 229]
+# live screenshot of the full "New" fly-out (uniform ~52px row spacing).
+# Real on-screen order confirmed live: "AccuMate Config File" (0),
+# "Report Configuration" (1), "Translation" (2), "Equation Set" (3),
+# "Driver Database" (4). NOTE: an earlier version of this list omitted
+# "Report Configuration" entirely (a 4-item list that happened to still
+# work for Translation/Equation Set/Driver Database purely because their
+# offsets were copied verbatim from the real screenshot, just mislabeled
+# with the wrong 0-based indices) - fixed here to include all 5 real items.
+_APP_MENU_NEW_FLYOUT_Y_OFFSETS = [21, 73, 125, 177, 229]
 _NEW_FLYOUT_ACCUMATE_CONFIG_INDEX = 0
-_NEW_FLYOUT_TRANSLATION_INDEX = 1
-_NEW_FLYOUT_EQUATION_SET_INDEX = 2
-_NEW_FLYOUT_DRIVER_DATABASE_INDEX = 3
+_NEW_FLYOUT_REPORT_CONFIGURATION_INDEX = 1
+_NEW_FLYOUT_TRANSLATION_INDEX = 2
+_NEW_FLYOUT_EQUATION_SET_INDEX = 3
+_NEW_FLYOUT_DRIVER_DATABASE_INDEX = 4
 
 # How long a brand-new document takes to populate its Config Directory tree.
 # Unlike opening a saved file, "New" creates a blank in-memory document that
