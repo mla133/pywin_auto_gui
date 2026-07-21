@@ -1,20 +1,22 @@
 """
 scenarios/regression.md B1-B28 (Report Editor).
 
-B1-B3 and B15-B16 are LIVE-VERIFIED (real workflow functions, real control
-ids, real dialog titles - see workflows/report_workflows.py's module
-docstring for the full findings) and run as part of the default
-`pytest -s -v` suite.
+B1-B3, B15-B16, and B17-B26/B28 are LIVE-VERIFIED (real workflow
+functions, real control ids, real dialog titles - see
+workflows/report_workflows.py's module docstring for the full findings)
+and run as part of the default `pytest -s -v` suite. B27 is a refined
+`needs_live_verification` stub (partial/inconclusive live finding - see
+its docstring).
 
 Scope summary (see workflows/report_workflows.py for full detail):
   - B4-B14: need a live, reachable AccuLoad device AND a not-yet-built
     "AccuMate File Transfer" upload/download dialog workflow. B11/B12
     additionally need provided AM3 (.RPX)/early-AM4 report files not
     present in this repo/environment.
-  - B17-B28: canvas-level interactions (item offsets, Advanced format
-    dialog/validation, drag/drop moving, copy/paste, out-of-bounds,
-    document size/page count) not yet probed/implemented - each is marked
-    `needs_live_verification` below with a note on what's still unknown.
+  - B27: the Ticket #3644 placement-validation bug (see B26) blocks using
+    the dialog to place an out-of-range item after a resize, and reliably
+    dragging an item beyond a newly-shrunk page's bounds requires
+    canvas-scrolling support not yet built - remains `needs_live_verification`.
 """
 
 import os
@@ -25,6 +27,14 @@ from workflows.report_workflows import (
     create_new_report_file,
     get_report_items,
     insert_report_item,
+    set_report_item_format,
+    get_report_item_format,
+    drag_report_item,
+    copy_report_item,
+    paste_here,
+    set_clipboard_text,
+    set_report_custom_page_size,
+    set_report_number_of_pages,
     ITEM_TYPE_USER_TEXT,
     ITEM_TYPE_RUN_PROGRAM_DATA_VALUE,
     ITEM_TYPE_RUN_PROGRAM_DATA_DESCRIPTION,
@@ -150,117 +160,346 @@ def test_b16_creating_value_description_items(app):
     assert texts == ["Number of Load Arms", "6"]
 
 
-@pytest.mark.needs_live_verification
 def test_b17_creating_value_description_items_with_offsets(app):
     """
     B17: Creating Value/Description Items with Offsets.
-      Uses the "Select Data Item" dialog's Offset 1/2/3 fields (auto_ids
-      1006/1007/1021 - see report_workflows._select_data_item's docstring)
-      against "Pulse Input Config"->"Pulse Input Tag" with offset 1, then
-      14 (max). NOT YET IMPLEMENTED: _select_data_item doesn't currently
-      set the Offset fields - needs live verification of which of the
-      three Offset edits corresponds to regression.md's single "Offset"
-      value and the resulting "Pulse Input Tag (N)" Data Register text.
+      Live-confirmed: for a leaf that supports an offset (e.g. "Pulse
+      Input Config"->"Pulse Input Tag", offsets 1-14), only auto_id 1006
+      of the "Select Data Item" dialog's Offset 1/2/3 Edit triple drives
+      the result - it updates the (read-only) Data Register field to
+      "Pulse Input Tag (N)". NOTE: this offset annotation only appears in
+      the Data Register field, NOT in the read-only Item Value field or
+      the resulting canvas item text (live-confirmed both stay plain
+      "Pulse Input Tag" for a Description item regardless of offset - the
+      offset is descriptive/reference-only for this data item, not part
+      of its displayed report content), so this test checks the Data
+      Register field directly rather than the final canvas item text.
     """
-    pytest.skip("B17: Select Data Item dialog's Offset fields not yet wired into _select_data_item")
+    from workflows.report_workflows import (
+        _EDIT_REPORT_ITEM_DIALOG_TITLE,
+        _EDIT_REPORT_ITEM_DIALOG_CLASS,
+        _EDIT_REPORT_ITEM_DATA_REGISTER_AUTO_ID,
+        _EDIT_REPORT_ITEM_CHANGE_BUTTON_AUTO_ID,
+        _EDIT_REPORT_ITEM_TYPE_COMBO_AUTO_ID,
+        _EDIT_REPORT_ITEM_CANCEL_AUTO_ID,
+        _select_data_item,
+    )
+    from controls.ribbon_controls import click_ribbon_button
+    from pywinauto import Application
+    import time
+
+    create_new_report_file(app)
+
+    for offset, expected in ((1, "Pulse Input Tag (1)"), (14, "Pulse Input Tag (14)")):
+        uia_win = app.get_uia_window()
+        click_ribbon_button(uia_win, "Insert")
+        time.sleep(1.0)
+
+        dlg_spec = app.app.window(title=_EDIT_REPORT_ITEM_DIALOG_TITLE, class_name=_EDIT_REPORT_ITEM_DIALOG_CLASS)
+        dlg_spec.wait("exists visible ready", timeout=10)
+        win32_dlg = dlg_spec.wrapper_object()
+        hwnd = win32_dlg.handle
+        uia_dlg = Application(backend="uia").connect(handle=hwnd).window(handle=hwnd)
+
+        combo = next(d for d in win32_dlg.descendants(class_name="ComboBox") if str(d.control_id()) == _EDIT_REPORT_ITEM_TYPE_COMBO_AUTO_ID)
+        combo.select(ITEM_TYPE_RUN_PROGRAM_DATA_DESCRIPTION)
+        time.sleep(0.3)
+        uia_dlg.child_window(auto_id=_EDIT_REPORT_ITEM_CHANGE_BUTTON_AUTO_ID, control_type="Button").click_input()
+        time.sleep(1.0)
+        _select_data_item(app, ["Pulse Input Config", "Pulse Input Tag"], offset=offset)
+        time.sleep(0.5)
+
+        dr = next(e for e in win32_dlg.descendants(class_name="Edit") if str(e.control_id()) == _EDIT_REPORT_ITEM_DATA_REGISTER_AUTO_ID)
+        assert dr.window_text() == expected
+
+        uia_dlg.child_window(auto_id=_EDIT_REPORT_ITEM_CANCEL_AUTO_ID, control_type="Button").click_input()
+        time.sleep(0.5)
 
 
-@pytest.mark.needs_live_verification
 def test_b18_changing_the_format_of_report_items(app):
     """
     B18: Changing the Format of Report Items.
-      Needs a live probe of the "Advanced..." button's (auto_id 1011)
-      "Advanced Report Item Options" dialog - not yet done.
+      Insert a Value item against a string-typed register ("Pulse Input
+      Config"->"Pulse Input Tag"), open "Advanced..." and set Format to
+      "%10.10s" -> the change propagates back to and persists on the
+      parent "Edit Report Item" dialog's own Format field.
     """
-    pytest.skip("B18: 'Advanced...' dialog controls not yet probed")
+    create_new_report_file(app)
+    insert_report_item(
+        app, item_type=ITEM_TYPE_RUN_PROGRAM_DATA_VALUE, line=1,
+        tree_path=["Pulse Input Config", "Pulse Input Tag"],
+    )
+    win = app.get_window()
+    item_ctrl = next(d for d in win.descendants(class_name="Button") if d.control_id() and d.control_id() >= 10000)
+    item_ctrl.click_input(double=True)
+    import time
+    time.sleep(1.0)
+
+    ok = set_report_item_format(app, "%10.10s")
+    assert ok is True
+    assert get_report_item_format(app) == "%10.10s"
 
 
-@pytest.mark.needs_live_verification
 def test_b19_using_invalid_formats_for_string_report_items(app):
     """
     B19: Using Invalid Formats for String Report Items.
-      Same "Advanced..." dialog dependency as B18, plus needs to confirm
-      the validation-warning popup's title/text for an incompatible format
-      (e.g. "%d" on a string value).
+      Setting an incompatible format (e.g. "%d" against a string-typed
+      value) pops the "AccuMate" warning dialog with text "Invalid Format
+      String - Type specifier does not match item data type" instead of
+      accepting the change.
     """
-    pytest.skip("B19: 'Advanced...' dialog controls not yet probed - see B18")
+    create_new_report_file(app)
+    insert_report_item(
+        app, item_type=ITEM_TYPE_RUN_PROGRAM_DATA_DESCRIPTION, line=1,
+        tree_path=["Load Arm Layout", "Number of Load Arms"],
+    )
+    win = app.get_window()
+    item_ctrl = next(d for d in win.descendants(class_name="Button") if d.control_id() and d.control_id() >= 10000)
+    item_ctrl.click_input(double=True)
+    import time
+    time.sleep(1.0)
+
+    ok = set_report_item_format(app, "%d")
+    assert ok is False
 
 
-@pytest.mark.needs_live_verification
 def test_b20_moving_items(app):
     """
-    B20: Moving Items. Needs a live-verified drag-and-drop gesture on a
-    report canvas Button-control item (not yet probed - may need the same
-    kind of held-mouse-button approach used for the "New" fly-out, or a
-    simpler click-drag since this isn't OS menu-tracking).
+    B20: Moving Items.
+      Dragging a placed item to a new, empty spot on the canvas moves it
+      (its rectangle changes) - a plain OS-level mouse press-move-release
+      gesture, no special held-drag timing trick required.
     """
-    pytest.skip("B20: canvas drag-and-drop not yet probed")
+    create_new_report_file(app)
+    insert_report_item(app, item_type=ITEM_TYPE_USER_TEXT, item_value="Drag Me", line=1, column=1)
+    win = app.get_window()
+    item_ctrl = next(d for d in win.descendants(class_name="Button") if d.window_text() == "Drag Me")
+    rect_before = item_ctrl.rectangle()
+
+    new_rect = drag_report_item(app, "Drag Me", dx=150, dy=120)
+
+    assert new_rect is not None
+    assert (new_rect.left, new_rect.top) != (rect_before.left, rect_before.top)
 
 
-@pytest.mark.needs_live_verification
 def test_b21_moving_items_over_other_items(app):
-    """B21: Moving Items over other Items. Same drag-and-drop dependency as B20."""
-    pytest.skip("B21: canvas drag-and-drop not yet probed - see B20")
+    """
+    B21: Moving Items over other Items.
+      Dragging one item directly onto another item is silently rejected -
+      the dragged item's rectangle is unchanged afterward.
+    """
+    create_new_report_file(app)
+    insert_report_item(app, item_type=ITEM_TYPE_USER_TEXT, item_value="Item A", line=1, column=1)
+    insert_report_item(app, item_type=ITEM_TYPE_USER_TEXT, item_value="Item B", line=10, column=1)
+
+    win = app.get_window()
+    target = next(d for d in win.descendants(class_name="Button") if d.window_text() == "Item B")
+    target_rect = target.rectangle()
+    dragged = next(d for d in win.descendants(class_name="Button") if d.window_text() == "Item A")
+    dragged_rect_before = dragged.rectangle()
+
+    dx = target_rect.mid_point().x - dragged_rect_before.mid_point().x
+    dy = target_rect.mid_point().y - dragged_rect_before.mid_point().y
+    new_rect = drag_report_item(app, "Item A", dx=dx, dy=dy)
+
+    assert (new_rect.left, new_rect.top) == (dragged_rect_before.left, dragged_rect_before.top)
 
 
-@pytest.mark.needs_live_verification
 def test_b22_copy_paste_items(app):
     """
-    B22: Copy/Paste Items. Needs a live probe of the canvas's right-click
-    context menu (Copy/Paste Here) - likely a real (UIA-visible) win32
-    context menu rather than the ribbon's custom-drawn backstage menu, but
-    unconfirmed.
+    B22: Copy/Paste Items.
+      Copy a placed item via its right-click context menu ("Copy"), then
+      "Paste Here" at a new empty canvas spot -> a duplicate item appears
+      with the same text.
     """
-    pytest.skip("B22: canvas right-click context menu (Copy/Paste) not yet probed")
+    create_new_report_file(app)
+    insert_report_item(app, item_type=ITEM_TYPE_USER_TEXT, item_value="Copy Source", line=1, column=1)
+    copy_report_item(app, "Copy Source")
+
+    win = app.get_window()
+    canvas_rect = win.rectangle()
+    paste_x = canvas_rect.left + 300
+    paste_y = canvas_rect.top + 300
+    paste_here(app, paste_x, paste_y)
+
+    items = get_report_items(app)
+    texts = [i["text"] for i in items]
+    assert texts.count("Copy Source") == 2
 
 
-@pytest.mark.needs_live_verification
 def test_b23_copy_paste_text_as_an_item(app):
     """
-    B23: Copy/Paste Text as an Item. Needs a live probe of pasting
-    clipboard text directly onto the canvas (via win32 clipboard API plus
-    the canvas's paste handling) - not yet attempted.
+    B23: Copy/Paste Text as an Item.
+      Put plain text on the Windows clipboard, then "Paste Here" on an
+      empty canvas spot -> a new item is created containing that text.
     """
-    pytest.skip("B23: clipboard-to-canvas paste not yet probed")
+    create_new_report_file(app)
+    set_clipboard_text("Pasted Clipboard Text")
+
+    win = app.get_window()
+    canvas_rect = win.rectangle()
+    paste_here(app, canvas_rect.left + 250, canvas_rect.top + 250)
+
+    items = get_report_items(app)
+    texts = [i["text"] for i in items]
+    assert "Pasted Clipboard Text" in texts
 
 
-@pytest.mark.needs_live_verification
 def test_b24_creating_items_out_of_bounds(app):
     """
-    B24: Creating Items Out of Bounds. Needs to confirm the exact
-    out-of-bounds warning dialog's title/text when an over-long Item Value
-    would exceed the canvas width.
+    B24: Creating Items Out of Bounds.
+      Typing an over-long Item Value (100 '-' characters) and OK'ing the
+      "Edit Report Item" dialog pops the "AccuMate" warning: "Placing a
+      report item at this position would exceed the column bounds. Please
+      choose a different line and/or column." The dialog is not closed by
+      this, and no item is added to the canvas.
     """
-    pytest.skip("B24: out-of-bounds warning dialog not yet probed")
+    create_new_report_file(app)
+    long_value = "-" * 100
+
+    from workflows.report_workflows import (
+        _EDIT_REPORT_ITEM_DIALOG_TITLE,
+        _EDIT_REPORT_ITEM_DIALOG_CLASS,
+        _EDIT_REPORT_ITEM_VALUE_AUTO_ID,
+        _EDIT_REPORT_ITEM_OK_AUTO_ID,
+        _INVALID_FORMAT_WARNING_TITLE,
+        _INVALID_FORMAT_WARNING_CLASS,
+        _send_text,
+    )
+    from controls.ribbon_controls import click_ribbon_button
+    from pywinauto import Application
+    from pywinauto.keyboard import send_keys
+    import time
+
+    uia_win = app.get_uia_window()
+    click_ribbon_button(uia_win, "Insert")
+    time.sleep(1.0)
+
+    dlg_spec = app.app.window(title=_EDIT_REPORT_ITEM_DIALOG_TITLE, class_name=_EDIT_REPORT_ITEM_DIALOG_CLASS)
+    dlg_spec.wait("exists visible ready", timeout=10)
+    hwnd = dlg_spec.wrapper_object().handle
+    uia_dlg = Application(backend="uia").connect(handle=hwnd).window(handle=hwnd)
+
+    value_edit = uia_dlg.child_window(auto_id=_EDIT_REPORT_ITEM_VALUE_AUTO_ID, control_type="Edit")
+    value_edit.click_input()
+    send_keys("^a")
+    _send_text(long_value)
+    time.sleep(0.2)
+    uia_dlg.child_window(auto_id=_EDIT_REPORT_ITEM_OK_AUTO_ID, control_type="Button").click_input()
+    time.sleep(0.8)
+
+    warn_spec = app.app.window(title=_INVALID_FORMAT_WARNING_TITLE, class_name=_INVALID_FORMAT_WARNING_CLASS)
+    assert warn_spec.exists(timeout=3)
+    warn_win32 = warn_spec.wrapper_object()
+    ok_btn = next(b for b in warn_win32.descendants(class_name="Button") if b.window_text() == "OK")
+    ok_btn.click_input()
+    time.sleep(0.3)
+
+    cancel_btn = uia_dlg.child_window(control_type="Button", title="Cancel")
+    cancel_btn.click_input()
+    time.sleep(0.5)
+
+    items = get_report_items(app)
+    assert items == []
 
 
-@pytest.mark.needs_live_verification
 def test_b25_moving_items_out_of_bounds(app):
-    """B25: Moving Items Out of Bounds. Same drag-and-drop dependency as B20."""
-    pytest.skip("B25: canvas drag-and-drop not yet probed - see B20")
+    """
+    B25: Moving Items Out of Bounds.
+      Dragging an item to a location entirely off the visible canvas is
+      silently rejected - the item's rectangle is unchanged afterward.
+    """
+    create_new_report_file(app)
+    insert_report_item(app, item_type=ITEM_TYPE_USER_TEXT, item_value="Stay Put", line=1, column=1)
+    win = app.get_window()
+    item_ctrl = next(d for d in win.descendants(class_name="Button") if d.window_text() == "Stay Put")
+    rect_before = item_ctrl.rectangle()
+    win_rect = win.rectangle()
+
+    # Drag to just past the main window's right/bottom edge (off the visible
+    # canvas) while staying within the physical screen bounds - a huge
+    # (e.g. 5000px) offset overshoots the screen entirely and produces
+    # unreliable/garbage coordinates from the mouse driver.
+    dx = (win_rect.right - rect_before.left) + 50
+    dy = (win_rect.bottom - rect_before.top) + 50
+    new_rect = drag_report_item(app, "Stay Put", dx=dx, dy=dy)
+
+    assert (new_rect.left, new_rect.top) == (rect_before.left, rect_before.top)
 
 
-@pytest.mark.needs_live_verification
 def test_b26_changing_document_size(app):
     """
-    B26: Changing Document Size. Needs a live probe of the Report
-    Configuration-specific "Document Options" dialog (distinct from the
-    AccuMate Config File's IP-address Document Options already used
-    elsewhere in this repo) - page size fields not yet confirmed.
+    B26: Changing Document Size.
+      Open Report Options, select "Custom:", set Columns/Lines to a new
+      size (100x100), OK -> reopening Report Options re-reads back the
+      same custom size.
     """
-    pytest.skip("B26: Report Configuration's Document Options dialog not yet probed")
+    create_new_report_file(app)
+    set_report_custom_page_size(app, columns=100, lines=100)
+
+    from workflows.report_workflows import (
+        open_report_document_options,
+        _REPORT_OPTIONS_COLUMNS_AUTO_ID,
+        _REPORT_OPTIONS_LINES_AUTO_ID,
+        _REPORT_OPTIONS_CANCEL_AUTO_ID,
+    )
+    from pywinauto import Application
+
+    dlg = open_report_document_options(app)
+    hwnd = dlg.handle
+    uia_dlg = Application(backend="uia").connect(handle=hwnd).window(handle=hwnd)
+    cols_edit = next(e for e in dlg.descendants(class_name="Edit") if str(e.control_id()) == _REPORT_OPTIONS_COLUMNS_AUTO_ID)
+    lines_edit = next(e for e in dlg.descendants(class_name="Edit") if str(e.control_id()) == _REPORT_OPTIONS_LINES_AUTO_ID)
+    assert cols_edit.window_text() == "100"
+    assert lines_edit.window_text() == "100"
+    uia_dlg.child_window(auto_id=_REPORT_OPTIONS_CANCEL_AUTO_ID, control_type="Button").click_input()
 
 
 @pytest.mark.needs_live_verification
 def test_b27_changing_document_size_items_out_of_bounds(app):
-    """B27: Changing Document Size - Items Out of Bounds. Same Document Options dependency as B26."""
-    pytest.skip("B27: Report Configuration's Document Options dialog not yet probed - see B26")
+    """
+    B27: Changing Document Size - Items Out of Bounds.
+      NOT fully confirmed: the Ticket #3644 bug (see B26/set_report_custom_page_size's
+      docstring) blocks using the "Edit Report Item" dialog to place an
+      item at a spot that would be out-of-bounds after a subsequent
+      shrink, and reliably dragging an item to a location beyond a
+      shrunk page's new bounds requires canvas-scrolling support not yet
+      built in this repo (drags landing outside the currently-visible
+      canvas viewport are rejected the same way as a genuine
+      out-of-bounds drop - see B25 - which makes a live attempt
+      inconclusive rather than a confirmed negative). Needs a follow-up
+      pass with scroll support before this can be a real assertion.
+    """
+    pytest.skip("B27: needs canvas-scrolling support to reliably reproduce a post-shrink out-of-bounds item")
 
 
-@pytest.mark.needs_live_verification
 def test_b28_changing_number_of_pages_in_a_document(app):
-    """B28: Changing Number of Pages in a Document. Same Document Options dependency as B26."""
-    pytest.skip("B28: Report Configuration's Document Options dialog not yet probed - see B26")
+    """
+    B28: Changing Number of Pages in a Document.
+      Set "Number of Pages in Report" to 2 -> reopening Report Options
+      re-reads back "2". NOTE: the resulting effective canvas dimensions
+      regression.md claims ("120 x 80") were not independently
+      re-derived live - the Columns/Lines fields in this same dialog stay
+      at their prior Default 80/60 values after this change (see
+      set_report_number_of_pages's docstring) - this test only asserts
+      the field itself round-trips correctly.
+    """
+    create_new_report_file(app)
+    set_report_number_of_pages(app, num_pages=2)
+
+    from workflows.report_workflows import (
+        open_report_document_options,
+        _REPORT_OPTIONS_PAGES_AUTO_ID,
+        _REPORT_OPTIONS_CANCEL_AUTO_ID,
+    )
+    from pywinauto import Application
+
+    dlg = open_report_document_options(app)
+    hwnd = dlg.handle
+    uia_dlg = Application(backend="uia").connect(handle=hwnd).window(handle=hwnd)
+    pages_edit = next(e for e in dlg.descendants(class_name="Edit") if str(e.control_id()) == _REPORT_OPTIONS_PAGES_AUTO_ID)
+    assert pages_edit.window_text() == "2"
+    uia_dlg.child_window(auto_id=_REPORT_OPTIONS_CANCEL_AUTO_ID, control_type="Button").click_input()
 
 
 @pytest.mark.requires_device
