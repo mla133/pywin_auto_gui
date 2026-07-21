@@ -1,78 +1,94 @@
 """
-DRAFT / NOT YET LIVE-VERIFIED - Driver Database document type workflows
-(scenarios/regression.md D1-D9).
+Driver Database document type workflows (scenarios/regression.md D1-D9).
 
-Written by pattern-inference from existing workflows (file_workflows.py's
-Application Button handling, main_page.py's "Edit Program Code Data" dialog
-pattern) and regression.md's step text ALONE - deliberately without any live
-AccuMate window interaction, per the constraint of not stealing screen focus
-during this scoping pass. Every control id/dialog title/coordinate below is
-either copied from a genuinely confirmed sibling workflow (safe to reuse) or
-marked "TODO: verify live" (a guess that must be confirmed/corrected against
-the real running app before use). All new tests built on this module should
-carry the `needs_live_verification` pytest marker (see pytest.ini) so they
-never run as part of a routine pytest pass.
+D1-D4 are LIVE-VERIFIED against the real running app (control ids, dialog
+titles, and the "New" fly-out mechanism all confirmed live - see
+workflows/file_workflows.py's _click_new_document_flyout_item for the
+fly-out mechanism itself). D6-D9 remain unimplemented - see the "Remaining
+gaps" section below.
 
-Open questions to resolve during live verification (do NOT assume any of
-these - confirm against the real app):
-  1. file_workflows.new_config_file()'s docstring explicitly states "New"
-     has NO hover/fly-out submenu in this build - a single click directly
-     creates a blank AccuMate Config File. But regression.md D1/E1 describe
-     hovering "New" then choosing "Driver Database"/"Equation Set" from a
-     fly-out list of document types. These two claims conflict. Live
-     verification must determine which is actually true for "New" (maybe it
-     depends on AccuMate version, or the other document types simply weren't
-     tried when that docstring was written). If a fly-out really exists,
-     _click_new_document_type() below will need coordinates/timing similar
-     to _click_app_menu_item()'s "Save As" submenu-retry handling, OR the
-     fly-out items might expose stable UIA automation ids unlike the
-     Application Button's own items - investigate both before assuming a
-     coordinate-click is required.
-  2. "Edit Database Record" dialog: control ids for Card Data/HID Format
-     button/PIN #/Field 1-3 fields are unknown - a fresh probe (open the
-     dialog once, dump its descendants via controls/debug_tools.
-     safe_dump_control) is required. Placeholders below use symbolic names,
-     not real automation_ids yet.
-  3. The "< Enter in HID Format..." button opens a SECOND nested dialog
-     ("a dialog will be presented to provide a formatted ID" per D2 step 4)
-     whose own field layout/bounds-per-field validation is entirely unknown.
-  4. "Upload File to AccuLoad"/"Download File From AccuLoad" ("AccuMate File
-     Transfer" window, per E4 step 4's Expected Result) has NO existing
-     workflow anywhere in this repo (confirmed via repo-wide grep) - this is
-     new ground, not just a Driver-DB-specific gap. It's needed by D6-D8
-     (and reused as-is by E4-E6). A dedicated shared module (e.g.
-     workflows/file_transfer_workflows.py) probably makes more sense than
-     duplicating it in driver_db_workflows.py and equation_workflows.py -
-     revisit this file split once the dialog's actual controls are known.
-  5. D6-D9 also need real device access (D6/D7) or provided AM3 test files
-     (D9's .3DB) neither of which exist in this repo/environment yet - same
-     class of blocker as H3-H8's provided AL4/equ/rep files. Treat D6-D9 as
-     blocked/deferred until those become available, same as H3-H8.
+Live-verified findings:
+  - The Application Button's "New" item DOES have a real fly-out submenu
+    ("AccuMate Config File", "Translation", "Equation Set", "Driver
+    Database") - resolving the conflict noted in an earlier draft of this
+    module. It only renders under a genuine held-mouse-button drag gesture;
+    see file_workflows._click_new_document_flyout_item's docstring for why.
+  - Selecting "Driver Database" creates a new document titled
+    "DDB<n> - AccuMate for AccuLoad" with a single-column-header
+    SysListView32 grid (columns: ID Number, HID #, PIN, Field #1, Field #2,
+    Field #3) - the same get_list/get_list_row_texts primitives used
+    elsewhere in this repo for Config Directory listviews work unchanged
+    here.
+  - Double-clicking a grid row opens the "Edit Database Record" dialog
+    (title confirmed exact, class "#32770") with these real automation_ids:
+    Raw Card Data edit=1005, PIN #=1161, Field 1=1144, Field 2=1019,
+    Field 3=1160, "< Enter in HID Format..." button=1011, OK=1, Cancel=2.
+  - The HID Format button opens a second dialog titled
+    "HID Card Data Encoding" with three Edit fields left-to-right:
+    Extended Code (0-4095)=1158, Facility Code (0-255)=1159,
+    Card # (0-65535)=1144 (a different dialog, so this ID overlaps
+    harmlessly with the parent dialog's Field 1 automation_id), OK=1,
+    Cancel=2, Help=9. OK'ing it converts the three values into a single
+    packed number back in the parent dialog's Raw Card Data field (e.g.
+    Extended=3, Facility=7, Card#=12345 -> Raw Card Data "0030730") -
+    confirmed live, matching regression.md D2 step 5 exactly.
+  - Reading Edit control values reliably requires the win32 backend's
+    descendants(class_name="Edit") + .window_text() (matched by
+    .control_id()) - the UIA backend's own .window_text()/legacy_properties
+    Value were both unreliable/empty for these specific Edit controls in
+    live testing (a different flavor of the "UIA text automation doesn't
+    work reliably in this app" pattern already documented elsewhere in this
+    repo), so this module intentionally uses win32-backend reads throughout
+    even though UIA is still used to reach controls by automation_id for
+    writes/clicks (a form of the dual-backend approach documented in
+    the repo-level custom instructions' "Key conventions" section).
+
+Remaining gaps (NOT yet implemented/verified):
+  - D5 (Save As / Open comparison): needs workflows.file_workflows.save_as/
+    open_file_dialog confirmed compatible with non-Config document types -
+    not yet tried live.
+  - D6-D8: need a live, reachable AccuLoad device AND a not-yet-built
+    "AccuMate File Transfer" upload/download dialog workflow (genuinely new
+    ground, no existing code anywhere in this repo touches that dialog).
+  - D9: needs a provided AM3-format Database Driver File (.3DB) that does
+    not currently exist in this repo/environment - same class of blocker as
+    H3-H8's provided files.
 """
 
+import time
+
+from pywinauto.keyboard import send_keys
+from pywinauto import Application
+
 from controls.common_controls import get_list, get_list_row_texts
+from workflows.file_workflows import (
+    _click_new_document_flyout_item,
+    _NEW_FLYOUT_DRIVER_DATABASE_INDEX,
+)
 
-# TODO: verify live - if "New" turns out to have a real fly-out submenu for
-# non-config document types (see open question #1 above), this is the
-# 0-based index of "Driver Database" within that fly-out, analogous to
-# file_workflows._APP_MENU_ITEM_Y_OFFSETS. Left as None until confirmed.
-_NEW_MENU_DRIVER_DATABASE_ITEM = None
-
-# TODO: verify live - these are placeholder/symbolic, not confirmed
-# automation_ids. Populate once a live probe of "Edit Database Record" is
-# done (see controls/debug_tools.safe_dump_control for the established
-# dump-a-dialog's-descendants pattern used elsewhere in this repo).
 _EDIT_RECORD_DIALOG_TITLE = "Edit Database Record"
 _EDIT_RECORD_DIALOG_CLASS = "#32770"
-_EDIT_RECORD_HID_FORMAT_BUTTON_AUTO_ID = None  # "< Enter in HID Format..."
-_EDIT_RECORD_PIN_FIELD_AUTO_ID = None
-_EDIT_RECORD_FIELD1_AUTO_ID = None
-_EDIT_RECORD_FIELD2_AUTO_ID = None
-_EDIT_RECORD_FIELD3_AUTO_ID = None
-_EDIT_RECORD_OK_AUTO_ID = "1"  # IDOK is conventionally "1" across this app's dialogs
+_EDIT_RECORD_RAW_CARD_DATA_AUTO_ID = "1005"
+_EDIT_RECORD_HID_FORMAT_BUTTON_AUTO_ID = "1011"  # "< Enter in HID Format..."
+_EDIT_RECORD_PIN_FIELD_AUTO_ID = "1161"
+_EDIT_RECORD_FIELD1_AUTO_ID = "1144"
+_EDIT_RECORD_FIELD2_AUTO_ID = "1019"
+_EDIT_RECORD_FIELD3_AUTO_ID = "1160"
+_EDIT_RECORD_OK_AUTO_ID = "1"
+_EDIT_RECORD_CANCEL_AUTO_ID = "2"
+
+_HID_FORMAT_DIALOG_TITLE = "HID Card Data Encoding"
+_HID_FORMAT_DIALOG_CLASS = "#32770"
+_HID_FORMAT_EXTENDED_CODE_AUTO_ID = "1158"
+_HID_FORMAT_FACILITY_CODE_AUTO_ID = "1159"
+_HID_FORMAT_CARD_NUMBER_AUTO_ID = "1144"
+_HID_FORMAT_OK_AUTO_ID = "1"
+
+_NEW_DDB_TITLE_RE = r"DDB\d+ - AccuMate for AccuLoad"
+_NEW_DDB_TIMEOUT = 20
 
 
-def create_new_driver_database_file(app_obj):
+def create_new_driver_database_file(app_obj, timeout=_NEW_DDB_TIMEOUT):
     """
     D1: Create New Driver Database Files.
 
@@ -80,84 +96,162 @@ def create_new_driver_database_file(app_obj):
     over 'New'. Click on 'Driver Database'." -> "The application will
     display a new Driver Database view."
 
-    NOT YET LIVE-VERIFIED - see module docstring open question #1. As
-    written, this assumes a fly-out submenu exists and reuses
-    _click_app_menu_item's hover-then-click machinery; if live verification
-    finds no such submenu (matching new_config_file's existing docstring
-    claim), this function's approach is wrong and needs a full rewrite once
-    the real behavior is confirmed.
+    Uses the "New" fly-out drag mechanism (see file_workflows.
+    _click_new_document_flyout_item) to select "Driver Database", then
+    polls for the Driver Database grid (a SysListView32) to appear -
+    confirmed live this document type doesn't need to attempt a device
+    connection first (unlike new_config_file's blank Config File, which
+    does), so it should settle much faster, but this still polls rather
+    than assuming instant success.
     """
-    raise NotImplementedError(
-        "D1: needs live verification of whether the Application Button's "
-        "'New' item has a real fly-out submenu for 'Driver Database' before "
-        "this can be implemented correctly - see module docstring."
+    print("[STEP] Opening Application menu -> New -> Driver Database")
+    _click_new_document_flyout_item(app_obj, _NEW_FLYOUT_DRIVER_DATABASE_INDEX)
+
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            title = app_obj.get_window().window_text()
+            if "DDB" in title and get_list(app_obj).item_count() >= 1:
+                print(f"[INFO] New Driver Database file created: {title!r}")
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    raise RuntimeError(
+        f"New Driver Database view did not appear/populate within {timeout}s"
     )
 
 
 def get_driver_database_rows(app_obj):
     """
-    Read all rows currently shown in the Driver Database grid view, using
-    the same get_list/get_list_row_texts primitives as MainPage - these are
-    backend-agnostic SysListView32 helpers already confirmed working for
-    Config Directory listviews, so likely (but not yet confirmed) reusable
-    here unchanged since the Driver Database view is also listview-based
-    per regression.md's screenshots/description ("first row", "double
-    click on the entry").
+    Read all rows currently shown in the Driver Database grid view.
+    Live-confirmed: this is a plain SysListView32, same as Config Directory
+    views, so the existing get_list/get_list_row_texts primitives apply
+    unchanged.
     """
     lst = get_list(app_obj)
     return [get_list_row_texts(lst, i) for i in range(lst.item_count())]
 
 
+def _get_dialog_by_app(win32_app, title, class_name, timeout=10):
+    dlg_spec = win32_app.window(title=title, class_name=class_name)
+    dlg_spec.wait("exists visible ready", timeout=timeout)
+    win32_dlg = dlg_spec.wrapper_object()
+    hwnd = win32_dlg.handle
+    uia_dlg = Application(backend="uia").connect(handle=hwnd).window(handle=hwnd)
+    return win32_dlg, uia_dlg
+
+
+def _get_dialog(app_obj, title, class_name, timeout=10):
+    return _get_dialog_by_app(app_obj.app, title, class_name, timeout)
+
+
 def open_edit_database_record_dialog(app_obj, row_index=0):
     """
     D2/D3/D4 step 1: Double-click a Driver Database grid row to open the
-    "Edit Database Record" dialog.
-
-    NOT YET LIVE-VERIFIED - dialog title/class copied from the sibling
-    "Edit Program Code Data" dialog pattern (main_page.py's
-    open_program_code_data_dialog) as a starting guess only; regression.md
-    doesn't state the exact title text, and this app has been seen to use
-    slightly different title text than a first guess more than once (see
-    checkpoint history for the DY/EA progress-dialog title mismatches) - do
-    not trust _EDIT_RECORD_DIALOG_TITLE without confirming it live first.
+    "Edit Database Record" dialog. Returns (win32_dlg, uia_dlg) - the win32
+    wrapper is used for reliable text reads, the uia wrapper for
+    automation_id-based control lookups (see module docstring).
     """
-    raise NotImplementedError(
-        "D2/D3/D4: needs live verification of the 'Edit Database Record' "
-        "dialog's actual title/class/control ids before this can be "
-        "implemented - see module docstring open question #2."
-    )
+    lst = get_list(app_obj)
+
+    if row_index >= lst.item_count():
+        raise RuntimeError(
+            f"Driver Database grid only has {lst.item_count()} row(s), "
+            f"cannot open row {row_index}"
+        )
+
+    item = lst.get_item(row_index)
+    item.select()
+
+    rect = item.rectangle()
+    x = rect.left + 60
+    y = rect.top + rect.height() // 2
+
+    print(f"[INFO] Opening 'Edit Database Record' dialog for row {row_index}")
+    lst.click_input(coords=(x, y))
+    lst.click_input(coords=(x, y), double=True)
+
+    return _get_dialog(app_obj, _EDIT_RECORD_DIALOG_TITLE, _EDIT_RECORD_DIALOG_CLASS)
 
 
-def enter_hid_format_id(dlg, formatted_id):
+def _set_edit_field(uia_dlg, auto_id, value):
+    """Reliable field-set pattern for this app's Edit controls: click to
+    focus, select-all, type - UIA's set_edit_text() was seen to intermittently
+    raise a COMError on freshly-opened dialogs in this app (live-confirmed on
+    the HID Format dialog specifically)."""
+    edit = uia_dlg.child_window(auto_id=auto_id, control_type="Edit")
+    edit.click_input()
+    time.sleep(0.15)
+    send_keys("^a")
+    send_keys(str(value))
+    time.sleep(0.15)
+
+
+def _read_edit_field(win32_dlg, auto_id):
+    """Reliable field-read pattern: win32 backend descendants matched by
+    control_id() - the UIA backend's window_text()/legacy Value were both
+    unreliable/empty for these Edit controls in live testing."""
+    for d in win32_dlg.descendants(class_name="Edit"):
+        if str(d.control_id()) == str(auto_id):
+            return d.window_text()
+    raise RuntimeError(f"Edit control with auto_id={auto_id!r} not found")
+
+
+def enter_hid_format_id(app_obj, win32_dlg, uia_dlg, extended_code, facility_code, card_number):
     """
-    D2 step 4-5: Click "< Enter in HID Format..." to open a nested dialog,
-    enter a formatted ID, and OK it - the "Edit Database Record" dialog
-    then shows the ID converted to a single number in Card Data.
+    D2 step 4-5: Click "< Enter in HID Format..." to open the "HID Card
+    Data Encoding" dialog, enter Extended/Facility/Card # values (bounds
+    per the dialog itself: Extended Code 0-4095, Facility Code 0-255,
+    Card # 0-65535), OK it - the "Edit Database Record" dialog's Raw Card
+    Data field is then populated with the values packed into a single
+    number (confirmed live: 3/7/12345 -> "0030730").
 
-    NOT YET LIVE-VERIFIED - see module docstring open question #3; the
-    nested dialog's field layout and "bounds on each field" validation
-    rules mentioned in D2 step 5 are completely unknown without a live
-    probe.
+    `win32_dlg`/`uia_dlg` are the "Edit Database Record" dialog wrappers
+    returned by open_edit_database_record_dialog(). Returns the resulting
+    Raw Card Data string.
     """
-    raise NotImplementedError(
-        "D2: needs live verification of the HID Format sub-dialog's layout "
-        "before this can be implemented - see module docstring open "
-        "question #3."
-    )
+    hid_btn = uia_dlg.child_window(auto_id=_EDIT_RECORD_HID_FORMAT_BUTTON_AUTO_ID, control_type="Button")
+    print("[STEP] Clicking '< Enter in HID Format...'")
+    hid_btn.click_input()
+    time.sleep(0.8)
+
+    # The HID Format dialog is a separate top-level window (not a child of
+    # Edit Database Record), so it's looked up the same way as any other
+    # top-level dialog via the app's own win32 Application object.
+    hid_win32_dlg, hid_uia_dlg = _get_dialog_by_app(app_obj.app, _HID_FORMAT_DIALOG_TITLE, _HID_FORMAT_DIALOG_CLASS)
+
+    print(f"[INFO] Setting Extended={extended_code}, Facility={facility_code}, Card#={card_number}")
+    _set_edit_field(hid_uia_dlg, _HID_FORMAT_EXTENDED_CODE_AUTO_ID, extended_code)
+    _set_edit_field(hid_uia_dlg, _HID_FORMAT_FACILITY_CODE_AUTO_ID, facility_code)
+    _set_edit_field(hid_uia_dlg, _HID_FORMAT_CARD_NUMBER_AUTO_ID, card_number)
+
+    hid_uia_dlg.child_window(auto_id=_HID_FORMAT_OK_AUTO_ID, control_type="Button").click_input()
+    time.sleep(0.5)
+
+    raw_card_data = _read_edit_field(win32_dlg, _EDIT_RECORD_RAW_CARD_DATA_AUTO_ID)
+    print(f"[INFO] Raw Card Data after HID Format conversion: {raw_card_data!r}")
+    return raw_card_data
 
 
-def set_driver_record_fields(dlg, pin=None, field1=None, field2=None, field3=None):
+def set_driver_record_fields(win32_dlg, uia_dlg, pin=None, field1=None, field2=None, field3=None):
     """
     D3 step 3 / D4 step 3: set PIN # and Field 1-3 values in an open "Edit
     Database Record" dialog, then OK it.
-
-    NOT YET LIVE-VERIFIED - see module docstring open question #2.
     """
-    raise NotImplementedError(
-        "D3/D4: needs live verification of 'Edit Database Record' field "
-        "automation_ids before this can be implemented - see module "
-        "docstring open question #2."
-    )
+    if pin is not None:
+        _set_edit_field(uia_dlg, _EDIT_RECORD_PIN_FIELD_AUTO_ID, pin)
+    if field1 is not None:
+        _set_edit_field(uia_dlg, _EDIT_RECORD_FIELD1_AUTO_ID, field1)
+    if field2 is not None:
+        _set_edit_field(uia_dlg, _EDIT_RECORD_FIELD2_AUTO_ID, field2)
+    if field3 is not None:
+        _set_edit_field(uia_dlg, _EDIT_RECORD_FIELD3_AUTO_ID, field3)
+
+    print("[STEP] Clicking OK on Edit Database Record dialog")
+    uia_dlg.child_window(auto_id=_EDIT_RECORD_OK_AUTO_ID, control_type="Button").click_input()
+    time.sleep(0.5)
 
 
 def upload_driver_database_file(app_obj, file_path):
@@ -166,17 +260,14 @@ def upload_driver_database_file(app_obj, file_path):
     the ribbon "Upload File to AccuLoad" button's "AccuMate File Transfer"
     window.
 
-    NOT YET LIVE-VERIFIED, and additionally BLOCKED on live device access
-    (D6 requires a real AccuLoad connection) - see module docstring open
-    questions #4 and #5. No workflow for this dialog exists anywhere in
-    this repo yet; this is genuinely new ground, not just reuse of an
-    existing pattern.
+    NOT YET IMPLEMENTED - needs live device access plus a live probe of the
+    "AccuMate File Transfer" dialog's controls (no existing workflow for it
+    anywhere in this repo). See module docstring "Remaining gaps".
     """
     raise NotImplementedError(
         "D6: 'AccuMate File Transfer' upload dialog has no existing "
         "workflow in this repo and needs live device access plus a live "
-        "probe of its controls before this can be implemented - see module "
-        "docstring open questions #4 and #5."
+        "probe of its controls before this can be implemented."
     )
 
 
@@ -185,12 +276,12 @@ def download_driver_database_file(app_obj, save_path):
     D7/D8: Download a Driver Database File from a connected AccuLoad via
     the ribbon "Download File From AccuLoad" button.
 
-    NOT YET LIVE-VERIFIED, and additionally BLOCKED on live device access -
-    see module docstring open questions #4 and #5.
+    NOT YET IMPLEMENTED - see upload_driver_database_file's docstring; same
+    gap.
     """
     raise NotImplementedError(
         "D7/D8: 'AccuMate File Transfer' download dialog has no existing "
         "workflow in this repo and needs live device access plus a live "
-        "probe of its controls before this can be implemented - see module "
-        "docstring open questions #4 and #5."
+        "probe of its controls before this can be implemented."
     )
+
