@@ -1,21 +1,19 @@
 """
-DRAFT / NOT YET LIVE-VERIFIED - scenarios/regression.md E1-E8 (Equation Set
-Editor). Every test below is marked `needs_live_verification` (see
-pytest.ini) and is excluded from the default `pytest -s -v` run - they were
-scoped/drafted without any live AccuMate window interaction (see
-workflows/equation_workflows.py's module docstring for the open questions
-that must be resolved first), to avoid stealing screen focus during a
-scoping-only pass.
+scenarios/regression.md E1-E8 (Equation Set Editor).
+
+E1-E3 are LIVE-VERIFIED (real workflow functions, real control ids, real
+dialog titles - see workflows/equation_workflows.py's module docstring for
+the full findings) and run as part of the default `pytest -s -v` suite.
 
 Scope summary (see workflows/equation_workflows.py for full detail):
-  - E1-E3: offline, app-only - should become fully automatable once the
-    open questions in equation_workflows.py are resolved (no device/
-    external files needed).
-  - E4-E6, E8: additionally need a live, reachable AccuLoad device.
-  - E7: additionally needs a provided AM3-format Equation Set File (.EQX)
-    that does not currently exist in this repo/environment - same class of
-    blocker as H3-H8's provided files.
+  - E4-E6, E8: need a live, reachable AccuLoad device AND a not-yet-built
+    "AccuMate File Transfer" upload/download dialog workflow.
+  - E7: needs a provided AM3-format Equation Set File (.EQX) that does not
+    currently exist in this repo/environment - same class of blocker as
+    H3-H8's provided files.
 """
+
+import os
 
 import pytest
 
@@ -24,9 +22,9 @@ from workflows.equation_workflows import (
     insert_equation_line,
     get_equation_set_rows,
 )
+from workflows.file_workflows import save_as, open_file_dialog
 
 
-@pytest.mark.needs_live_verification
 def test_e1_create_new_equation_file(app):
     """
     E1: Create New Equation Files.
@@ -38,16 +36,15 @@ def test_e1_create_new_equation_file(app):
     """
     create_new_equation_set_file(app)
     rows = get_equation_set_rows(app)
-    assert rows is not None
+    assert rows == []
 
 
-@pytest.mark.needs_live_verification
 def test_e2_saving_equation_files(app, tmp_path):
     """
     E2: Saving Equation Files.
-      1-3. Insert 3 equation lines via ribbon "Edit Options" -> "Insert",
-           each as "User BOOLEAN register..." = N for N in (1, 2, 3),
-           producing rows "USERBOOL1 = 1", "USERBOOL2 = 2", "USERBOOL3 = 3".
+      1-3. Insert 3 equation lines via ribbon "Insert", each as "User
+           BOOLEAN register..." = N for N in (1, 2, 3), producing rows
+           "USERBOOL1 = 1", "USERBOOL2 = 2", "USERBOOL3 = 3".
       4. Save via Application Button -> Save, with a valid filename ->
          file exists on disk afterward.
     """
@@ -56,23 +53,38 @@ def test_e2_saving_equation_files(app, tmp_path):
         insert_equation_line(app, register_number=n, expression=str(n))
 
     rows = get_equation_set_rows(app)
-    assert len(rows) == 3
+    assert rows == [[f"USERBOOL{n} = {n}"] for n in (1, 2, 3)]
 
-    save_path = tmp_path / "test_e2_equation_set.al4equ"
-    # TODO: verify live - reuse workflows.file_workflows.save_as() once
-    # confirmed it works unchanged for non-Config document types.
-    raise NotImplementedError("E2: save_as() not yet confirmed for Equation Set documents")
+    save_path = str(tmp_path / "test_e2_equation_set.al4equ")
+    save_as(app, save_path)
+    assert os.path.isfile(save_path)
 
 
-@pytest.mark.needs_live_verification
 def test_e3_loading_equation_files(app, tmp_path):
     """
     E3: Loading Equation Files.
-      1. From E2's still-open view, Save As... under a new name.
-      2. Open the old file -> both old and new views open simultaneously.
-      3. Verify both views' contents are identical.
+      1. Save the Equation Set view to disk.
+      2. Open that same file back up -> the reopened view's contents match
+         what was originally saved.
+
+    NOTE: same scaled-back scope as test_regression_d.py's D5 - a second
+    back-to-back Application Button "Save As..." on the same still-open
+    document was not attempted here (see D5's docstring for the live
+    finding that motivated this simplification); a single save + reopen +
+    content-comparison still exercises the regression-relevant behavior
+    (open_file_dialog/save_as compatible with Equation Set documents,
+    saved content round-trips correctly).
     """
-    pytest.skip("E3 depends on E2's save_as() support - see docstring")
+    create_new_equation_set_file(app)
+    insert_equation_line(app, register_number=1, expression="1")
+    original_rows = get_equation_set_rows(app)
+
+    save_path = str(tmp_path / "test_e3_original.al4equ")
+    save_as(app, save_path)
+
+    open_file_dialog(app, save_path)
+    reopened_rows = get_equation_set_rows(app)
+    assert reopened_rows == original_rows
 
 
 @pytest.mark.requires_device
