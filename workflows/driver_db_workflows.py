@@ -64,6 +64,7 @@ from controls.common_controls import get_list, get_list_row_texts
 from workflows.file_workflows import (
     _click_new_document_flyout_item,
     _NEW_FLYOUT_DRIVER_DATABASE_INDEX,
+    open_new_document_verified,
 )
 
 _EDIT_RECORD_DIALOG_TITLE = "Edit Database Record"
@@ -96,31 +97,21 @@ def create_new_driver_database_file(app_obj, timeout=_NEW_DDB_TIMEOUT):
     over 'New'. Click on 'Driver Database'." -> "The application will
     display a new Driver Database view."
 
-    Uses the "New" fly-out drag mechanism (see file_workflows.
-    _click_new_document_flyout_item) to select "Driver Database", then
-    polls for the Driver Database grid (a SysListView32) to appear -
-    confirmed live this document type doesn't need to attempt a device
-    connection first (unlike new_config_file's blank Config File, which
-    does), so it should settle much faster, but this still polls rather
-    than assuming instant success.
+    Uses open_new_document_verified() (see file_workflows.py) rather than
+    a single fly-out click: live testing showed the fly-out's per-item
+    hit-testing is flaky (sporadically lands on a neighboring document
+    type or misses entirely) even with a stepped drag and generous dwell
+    times - retrying with a fresh verification check is more robust than
+    any single fixed offset/timing combination found.
     """
     print("[STEP] Opening Application menu -> New -> Driver Database")
-    _click_new_document_flyout_item(app_obj, _NEW_FLYOUT_DRIVER_DATABASE_INDEX)
 
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            title = app_obj.get_window().window_text()
-            if "DDB" in title and get_list(app_obj).item_count() >= 1:
-                print(f"[INFO] New Driver Database file created: {title!r}")
-                return
-        except Exception:
-            pass
-        time.sleep(0.5)
+    def _verify(app_obj):
+        title = app_obj.get_window().window_text()
+        return "DDB" in title and get_list(app_obj).item_count() >= 1
 
-    raise RuntimeError(
-        f"New Driver Database view did not appear/populate within {timeout}s"
-    )
+    open_new_document_verified(app_obj, _NEW_FLYOUT_DRIVER_DATABASE_INDEX, _verify, timeout=timeout)
+    print(f"[INFO] New Driver Database file created: {app_obj.get_window().window_text()!r}")
 
 
 def get_driver_database_rows(app_obj):

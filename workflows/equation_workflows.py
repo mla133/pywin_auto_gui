@@ -54,6 +54,7 @@ from controls.ribbon_controls import click_ribbon_button
 from workflows.file_workflows import (
     _click_new_document_flyout_item,
     _NEW_FLYOUT_EQUATION_SET_INDEX,
+    open_new_document_verified,
 )
 
 _EDIT_EQUATION_LINE_DIALOG_TITLE = "Edit Equation Line"
@@ -77,24 +78,22 @@ def create_new_equation_set_file(app_obj, timeout=_NEW_EQUATION_TIMEOUT):
     regression.md: "Click the top left circle button then hover your mouse
     over 'New'. Click on 'Equation Set'." -> "The application will display
     a new Equation Set view."
+
+    Uses open_new_document_verified() rather than a single fly-out click:
+    live testing showed the fly-out's per-item hit-testing is flaky
+    (sporadically lands on a neighboring document type, e.g. Translation
+    or Driver Database, or misses entirely) even with a stepped drag and
+    generous dwell times - retrying with a fresh verification check is
+    more robust than any single fixed offset/timing combination found.
     """
     print("[STEP] Opening Application menu -> New -> Equation Set")
-    _click_new_document_flyout_item(app_obj, _NEW_FLYOUT_EQUATION_SET_INDEX)
 
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            title = app_obj.get_window().window_text()
-            if "Equation" in title and get_list(app_obj) is not None:
-                print(f"[INFO] New Equation Set file created: {title!r}")
-                return
-        except Exception:
-            pass
-        time.sleep(0.5)
+    def _verify(app_obj):
+        title = app_obj.get_window().window_text()
+        return "Equation" in title and get_list(app_obj) is not None
 
-    raise RuntimeError(
-        f"New Equation Set view did not appear/populate within {timeout}s"
-    )
+    open_new_document_verified(app_obj, _NEW_FLYOUT_EQUATION_SET_INDEX, _verify, timeout=timeout)
+    print(f"[INFO] New Equation Set file created: {app_obj.get_window().window_text()!r}")
 
 
 def get_equation_set_rows(app_obj):

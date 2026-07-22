@@ -160,6 +160,7 @@ from controls.ribbon_controls import click_ribbon_button
 from workflows.file_workflows import (
     _click_new_document_flyout_item,
     _NEW_FLYOUT_REPORT_CONFIGURATION_INDEX,
+    open_new_document_verified,
 )
 
 _EDIT_REPORT_ITEM_DIALOG_TITLE = "Edit Report Item"
@@ -242,20 +243,12 @@ def create_new_report_file(app_obj, timeout=_NEW_REPORT_TIMEOUT):
     Configuration view is displayed.
     """
     print("[STEP] Opening Application menu -> New -> Report Configuration")
-    _click_new_document_flyout_item(app_obj, _NEW_FLYOUT_REPORT_CONFIGURATION_INDEX)
 
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            title = app_obj.get_window().window_text()
-            if "Report" in title:
-                print(f"[INFO] New Report Configuration file created: {title!r}")
-                return
-        except Exception:
-            pass
-        time.sleep(0.5)
+    def _verify(app_obj):
+        return "Report" in app_obj.get_window().window_text()
 
-    raise RuntimeError(f"New Report Configuration view did not appear within {timeout}s")
+    open_new_document_verified(app_obj, _NEW_FLYOUT_REPORT_CONFIGURATION_INDEX, _verify, timeout=timeout)
+    print(f"[INFO] New Report Configuration file created: {app_obj.get_window().window_text()!r}")
 
 
 def get_report_items(app_obj):
