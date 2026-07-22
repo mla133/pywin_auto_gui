@@ -17,12 +17,98 @@ BACKEND = "win32"
 _TITLE_RE = r".*" + re.escape(APP_TITLE) + r"\s*$"
 _CLASS_NAME_RE = r"^Afx:"
 
+# Position/size used to keep the automated app window on a secondary
+# monitor (off to the side of wherever the user is actively working), so
+# repeated focus/re-focus during UI automation doesn't interrupt them.
+# Auto-detected on first use (see _detect_secondary_monitor_rect()) unless
+# explicitly overridden via set_secondary_monitor_target(); None means "no
+# secondary monitor available / detection failed" (single-monitor setups
+# fall back to leaving the window wherever Windows placed it).
+_SECONDARY_MONITOR_RECT = "auto"
+
+
+def set_secondary_monitor_target(left, top, width=1400, height=900):
+    """
+    Explicitly configure the screen rectangle AccuMateApp should move its
+    window to (see move_to_secondary_monitor()), overriding auto-detection.
+    Call once at the start of a session with the secondary monitor's
+    coordinates (e.g. from System.Windows.Forms.Screen.AllScreens) before
+    launching/using AccuMateApp, so every subsequent window it manages
+    stays off the primary monitor. Pass left=None to disable repositioning
+    entirely (e.g. for genuinely single-monitor setups where auto-detection
+    should not be trusted).
+    """
+    global _SECONDARY_MONITOR_RECT
+    if left is None:
+        _SECONDARY_MONITOR_RECT = None
+    else:
+        _SECONDARY_MONITOR_RECT = (left, top, width, height)
+
+
+def _detect_secondary_monitor_rect(width=1400, height=900):
+    """
+    Auto-detect a non-primary monitor via win32api.EnumDisplayMonitors and
+    return a (left, top, width, height) rectangle positioned near its
+    top-left corner, sized `width`x`height`. Returns None if there's only
+    one monitor or detection fails for any reason (best-effort - a failure
+    here should never block launching/using the app, just leaves the
+    window at Windows' own default placement).
+    """
+    try:
+        import win32api
+
+        monitors = win32api.EnumDisplayMonitors()
+        if len(monitors) < 2:
+            return None
+
+        primary_handle = win32api.MonitorFromPoint((0, 0))
+        for handle, _, _ in monitors:
+            if handle == primary_handle:
+                continue
+            info = win32api.GetMonitorInfo(handle)
+            mon_left, mon_top, mon_right, mon_bottom = info["Monitor"]
+            left = mon_left + 20
+            top = mon_top + 40
+            return (left, top, width, height)
+    except Exception:
+        pass
+    return None
+
 
 class AccuMateApp:
 
     def __init__(self):
         self.app = Application(backend=BACKEND).start(APP_EXE)
         self._uia_app = None
+        self._moved_to_secondary = False
+
+    def _move_to_secondary_monitor_if_configured(self, win):
+        """
+        Move `win` to the configured (or auto-detected) secondary-monitor
+        rectangle the first time a window handle is resolved. Only
+        attempted once per AccuMateApp instance (repeated moves on every
+        get_window() call would be wasteful and could fight with the user
+        manually repositioning it); best-effort only - swallows failures
+        rather than blocking UI automation on this.
+        """
+        global _SECONDARY_MONITOR_RECT
+        if self._moved_to_secondary:
+            return
+        self._moved_to_secondary = True
+
+        if _SECONDARY_MONITOR_RECT == "auto":
+            _SECONDARY_MONITOR_RECT = _detect_secondary_monitor_rect()
+
+        if _SECONDARY_MONITOR_RECT is None:
+            return
+
+        try:
+            import win32gui
+
+            left, top, width, height = _SECONDARY_MONITOR_RECT
+            win32gui.MoveWindow(win.handle, left, top, width, height, True)
+        except Exception:
+            pass
 
     def get_window(self):
         # Get the window spec by title suffix + main-frame class name
@@ -32,7 +118,9 @@ class AccuMateApp:
         win_spec.wait("exists enabled visible ready", timeout=10)
 
         # Convert to a wrapper
-        return win_spec.wrapper_object()
+        win = win_spec.wrapper_object()
+        self._move_to_secondary_monitor_if_configured(win)
+        return win
 
     def get_uia_window(self):
         """Attach to the same top-level window via the UIA backend.
