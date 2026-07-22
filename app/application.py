@@ -47,12 +47,22 @@ def set_secondary_monitor_target(left, top, width=1400, height=900):
 
 def _detect_secondary_monitor_rect(width=1400, height=900):
     """
-    Auto-detect a non-primary monitor via win32api.EnumDisplayMonitors and
-    return a (left, top, width, height) rectangle positioned near its
-    top-left corner, sized `width`x`height`. Returns None if there's only
-    one monitor or detection fails for any reason (best-effort - a failure
+    Auto-detect a monitor the user is NOT actively working on and return a
+    (left, top, width, height) rectangle positioned near its top-left
+    corner, sized `width`x`height`. Returns None if there's only one
+    monitor or detection fails for any reason (best-effort - a failure
     here should never block launching/using the app, just leaves the
     window at Windows' own default placement).
+
+    Deliberately does NOT use Windows' own "primary monitor" designation
+    (the monitor at desktop coordinate (0, 0)) as a proxy for "where the
+    user is working" - confirmed live that this is backwards on this
+    machine's current setup, where the user's active monitor is the one
+    Windows calls "Secondary". Instead, this uses the current mouse cursor
+    position (via win32api.GetCursorPos) as the signal for which monitor
+    the user is actively on right now, and targets a *different* monitor
+    than that one - robust to whichever monitor Windows considers
+    "primary" and to future monitor-arrangement changes.
     """
     try:
         import win32api
@@ -61,9 +71,10 @@ def _detect_secondary_monitor_rect(width=1400, height=900):
         if len(monitors) < 2:
             return None
 
-        primary_handle = win32api.MonitorFromPoint((0, 0))
+        cursor_pos = win32api.GetCursorPos()
+        active_handle = win32api.MonitorFromPoint(cursor_pos)
         for handle, _, _ in monitors:
-            if handle == primary_handle:
+            if handle == active_handle:
                 continue
             info = win32api.GetMonitorInfo(handle)
             mon_left, mon_top, mon_right, mon_bottom = info["Monitor"]
