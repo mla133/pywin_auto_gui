@@ -62,8 +62,33 @@ TODO (not yet automated/live-verified):
     - G1's "block while running" (IsAppRunning() MsgBox) - needs AccuMate.exe
       running from the SAME installed location the installer would upgrade,
       which isn't the case for a fresh install-to-a-clean-directory test.
+
+KNOWN INSTALLER BUG (discovered live 2026-07-23, NOT a bug in this repo):
+    This dev machine carries leftover Windows "uninstall registry" entries
+    from real, manual installs of OLDER AccuMate versions done outside of
+    this automation (observed: 1.9, 1.11, 0.10, and the old "AccuMate III.NET"
+    product) - their original uninstaller .exe files no longer exist on
+    disk. AccuMateIVInstallerScript.iss's [Code] section detects ANY such
+    stale entry (its "old version" check isn't scoped to the specific
+    version being installed) and pops "An old version of AccuMate was
+    detected. Do you want to uninstall it?" - but since the referenced
+    uninstaller can't actually run, this MsgBox reappears identically
+    whether Yes or No is clicked, hanging the wizard in an infinite loop
+    that never reaches the Finish page. This was confirmed by clicking both
+    Yes and No repeatedly with no change. This is a genuine bug in the
+    installer script's own Pascal logic - not something pywinauto/this test
+    suite can safely click through, and out of scope for this Python repo to
+    fix (the fix would need to live in AccuMateIVInstallerScript.iss itself,
+    e.g. scoping the "old version" check to the AppId being installed, or
+    tolerating a missing old uninstaller gracefully).
+    `find_stale_accumate_uninstall_entries()` below detects this condition
+    up front so callers/tests can skip real-install tests with a clear
+    explanation instead of hanging. `wait_for_finish_and_close()` also
+    detects the loop defensively (bounded retries) and raises
+    `OldVersionLoopBug` with the same explanation if it happens anyway.
 """
 import time
+import winreg
 
 from pywinauto import Application, Desktop
 
@@ -71,6 +96,11 @@ INSTALLER_EXE = (
     r"C:\Users\allenma\SoftwareDevelopment\acculoadiv.AccuMate\install"
     r"\Installer for AccuMate for AccuLoad IV 1.12.exe"
 )
+
+# Matches the .iss script's `#define AppVersion GetStringFileInfo(...)` -
+# read from Release\AccuMate.exe's own ProductVersion at compile time.
+# Update this if the installer is ever recompiled against a newer build.
+APP_VERSION = "1.12"
 
 _WIZARD_CLASS = "TWizardForm"
 _BUTTON_CLASS = "TNewButton"
@@ -220,3 +250,198 @@ def get_ready_to_install_summary(win_spec):
     a real install."""
     memo = win_spec.child_window(class_name="TNewMemo")
     return memo.wrapper_object().window_text()
+
+
+_UNINSTALL_KEY_ROOTS = [
+    (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+]
+
+
+def find_stale_accumate_uninstall_entries(current_version=APP_VERSION):
+    """
+    Scan the Windows uninstall registry for AccuMate entries that do NOT
+    belong to current_version. See the "KNOWN INSTALLER BUG" note in this
+    module's docstring - any such entry triggers an infinite "old version
+    detected" dialog loop in the installer that never reaches Finish.
+
+    Returns a list of (registry_key_path, DisplayName) tuples; empty if the
+    machine is clean (only the current version, or nothing, installed).
+    """
+    stale = []
+    for hive, path in _UNINSTALL_KEY_ROOTS:
+        try:
+            key = winreg.OpenKey(hive, path)
+        except OSError:
+            continue
+        with key:
+            i = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(key, i)
+                except OSError:
+                    break
+                i += 1
+                if current_version in subkey_name:
+                    continue
+                try:
+                    with winreg.OpenKey(key, subkey_name) as subkey:
+                        display_name = winreg.QueryValueEx(subkey, "DisplayName")[0]
+                except OSError:
+                    continue
+                if "accumate" in display_name.lower():
+                    stale.append((rf"{path}\{subkey_name}", display_name))
+    return stale
+
+
+class OldVersionLoopBug(RuntimeError):
+    """
+    Raised by wait_for_finish_and_close() when the installer's "old version
+    detected" MsgBox reappears after being dismissed multiple times - a
+    genuine installer script bug (see this module's docstring), not
+    something safe to click through indefinitely. Callers/tests should treat
+    this the same as finding entries via
+    find_stale_accumate_uninstall_entries() up front: skip the real-install
+    test with a clear explanation rather than hang or retry forever.
+    """
+
+
+def _find_old_version_prompt():
+    """Return the Desktop window for the 'old version detected' MsgBox if
+    currently showing, else None."""
+    for w in Desktop(backend="win32").windows():
+        try:
+            if w.window_text() != "Setup":
+                continue
+            spec = Application(backend="win32").connect(handle=w.handle).window(handle=w.handle)
+            for c in spec.descendants(class_name="Static"):
+                if "old version" in c.window_text().lower():
+                    return spec
+        except Exception:
+            continue
+    return None
+
+
+def wait_for_finish_and_close(win_spec, timeout=90):
+    """
+    Wait for the Installing page to finish and the wizard to reach its
+    Finish page, then click '&Finish' to close it. Call only after
+    click_install() - this is the real file-copy step and can take a little
+    while, hence the longer default timeout.
+
+    Defensively watches for the "old version detected" MsgBox loop bug
+    (see this module's docstring) - dismisses it (clicking Yes) up to twice,
+    and raises OldVersionLoopBug with a clear explanation if it reappears a
+    third time rather than hanging for the full timeout.
+    """
+    finish_btn = win_spec.child_window(title="&Finish", class_name=_BUTTON_CLASS)
+    deadline = time.time() + timeout
+    old_version_prompts_seen = 0
+    while time.time() < deadline:
+        prompt = _find_old_version_prompt()
+        if prompt is not None:
+            old_version_prompts_seen += 1
+            if old_version_prompts_seen > 2:
+                raise OldVersionLoopBug(
+                    "Installer's 'old version detected' dialog reappeared "
+                    "after being dismissed - this is a known installer "
+                    "script bug triggered by stale AccuMate uninstall "
+                    "registry entries on this machine (see "
+                    "find_stale_accumate_uninstall_entries() and this "
+                    "module's docstring)."
+                )
+            prompt.child_window(title="&Yes", class_name="Button").click_input()
+            time.sleep(1)
+            continue
+        if finish_btn.exists() and finish_btn.wrapper_object().is_enabled():
+            break
+        time.sleep(0.5)
+    else:
+        raise TimeoutError("timed out waiting for the installer's Finish page")
+
+    finish_btn.click_input()
+    time.sleep(1)
+
+
+CURRENT_USER_INSTALL_ROOT = r"C:\Users\allenma\AppData\Local\Guidant\AccuMate"
+
+
+def get_current_user_install_dir(app_version):
+    """
+    Return the expected install directory for an "Install for current user"
+    install of the given version string (e.g. "1.12") - matches the .iss
+    script's DefaultDirName for the main\\current component:
+    {localappdata}\\Guidant\\AccuMate\\{#AppVersion}.
+    """
+    return rf"{CURRENT_USER_INSTALL_ROOT}\{app_version}"
+
+
+def get_current_user_installed_exe(app_version):
+    """Return the expected path to AccuMate.exe after an "Install for
+    current user" install of the given version."""
+    return rf"{get_current_user_install_dir(app_version)}\AccuMate.exe"
+
+
+def get_current_user_uninstaller(app_version):
+    """Return the expected path to the uninstaller after an "Install for
+    current user" install of the given version (Inno's standard
+    unins000.exe, alongside AccuMate.exe in the same install directory)."""
+    return rf"{get_current_user_install_dir(app_version)}\unins000.exe"
+
+
+def get_current_user_start_menu_dir(app_version):
+    """Return the expected Start Menu folder for an "Install for current
+    user" install - matches the .iss script's [Icons] entries using
+    {userstartmenu}\\Guidant\\AccuMate\\{#AppVersion}."""
+    import os
+
+    return os.path.expandvars(
+        rf"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Guidant\AccuMate\{app_version}"
+    )
+
+
+def run_uninstaller(uninstall_exe, timeout=60):
+    """
+    Launch the given uninstaller exe and drive its confirmation wizard to
+    completion: "Confirm Uninstall" (Yes) -> waits for the process to exit.
+    Returns once the uninstall completes. Raises if the confirmation dialog
+    or its Yes button can't be found.
+    """
+    Application(backend="win32").start(uninstall_exe)
+
+    win = None
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for w in Desktop(backend="win32").windows():
+            try:
+                title = w.window_text()
+            except Exception:
+                continue
+            if "Uninstall" in title or "Confirm" in title:
+                win = w
+                break
+        if win:
+            break
+        time.sleep(0.5)
+
+    if win is None:
+        raise RuntimeError("Uninstaller confirmation window did not appear")
+
+    app = Application(backend="win32").connect(handle=win.handle)
+    win_spec = app.window(handle=win.handle)
+    win_spec.wait("exists enabled visible ready", timeout=10)
+
+    yes_btn = win_spec.child_window(title="&Yes", class_name="Button")
+    yes_btn.wait("enabled visible", timeout=10)
+    yes_btn.click_input()
+
+    # Wait for the uninstaller process itself to exit (it removes its own
+    # exe/log on completion, so polling the window disappearing is the
+    # simplest completion signal).
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not win_spec.exists():
+            return
+        time.sleep(0.5)
+    raise RuntimeError("Uninstaller did not finish within timeout")

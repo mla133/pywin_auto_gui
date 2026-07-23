@@ -33,6 +33,7 @@ _APP_MENU_ITEM_Y_OFFSETS = [21, 65, 108, 151, 198, 247, 295, 343]
 _APP_MENU_NEW_INDEX = 0
 _APP_MENU_SAVE_AS_INDEX = 3
 _APP_MENU_CLOSE_INDEX = 6
+_APP_MENU_ABOUT_INDEX = 7
 
 # "New" (and "Print") show a right-pointing fly-out arrow, but a plain
 # click_input() on "New" does NOT open that fly-out - it immediately
@@ -519,6 +520,68 @@ def close_current_file(app_obj, retries=3):
         raise RuntimeError("Could not find 'No' button on save-changes confirmation dialog")
 
     time.sleep(0.5)
+
+
+def open_about_dialog(app_obj, timeout=8):
+    """
+    Open the ribbon Application Button's "About" menu item (index 7) and
+    return the resulting About dialog as a win32 WindowSpecification.
+
+    This was previously only known as an accidental failure mode of
+    close_current_file() (a mis-click landing here instead of "Close") -
+    exposed here as a real, intentional helper since scenarios/regression.md
+    G3-G5 need to verify the correct version number is shown after
+    installing (see get_about_dialog_text/close_about_dialog).
+    """
+    _click_app_menu_item(app_obj, _APP_MENU_ABOUT_INDEX)
+
+    dlg_spec = app_obj.app.window(title_re=_ABOUT_DIALOG_TITLE_RE, class_name="#32770")
+    dlg_spec.wait("exists enabled visible ready", timeout=timeout)
+    return dlg_spec
+
+
+def get_about_dialog_text(app_obj, timeout=8):
+    """
+    Open the About dialog, concatenate all of its Static control text (which
+    includes the version number, e.g. "Version 1.12"), close it again, and
+    return that text. Used to confirm the installed AccuMate's About section
+    reports the expected version after a fresh install (G3/G4/G5 step 1).
+    """
+    dlg_spec = open_about_dialog(app_obj, timeout=timeout)
+    dlg = dlg_spec.wrapper_object()
+
+    texts = []
+    for ctrl in dlg.descendants(class_name="Static"):
+        try:
+            text = ctrl.window_text()
+            if text:
+                texts.append(text)
+        except Exception:
+            continue
+
+    close_about_dialog(app_obj, dlg_spec)
+    return "\n".join(texts)
+
+
+def close_about_dialog(app_obj, dlg_spec=None):
+    """Close the About dialog (OK button, falls back to Escape)."""
+    try:
+        if dlg_spec is None:
+            dlg_spec = app_obj.app.window(title_re=_ABOUT_DIALOG_TITLE_RE, class_name="#32770")
+        dlg = dlg_spec.wrapper_object()
+        for ctrl in dlg.descendants(class_name="Button"):
+            try:
+                if "OK" in ctrl.window_text():
+                    ctrl.click_input()
+                    return
+            except Exception:
+                continue
+        dlg.close()
+    except Exception:
+        try:
+            app_obj.get_window().type_keys("{ESC}")
+        except Exception:
+            pass
 
 
 def _open_save_as_dialog(app_obj, retries=3):

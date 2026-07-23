@@ -88,8 +88,14 @@ def _detect_secondary_monitor_rect(width=1400, height=900):
 
 class AccuMateApp:
 
-    def __init__(self):
-        self.app = Application(backend=BACKEND).start(APP_EXE)
+    def __init__(self, exe_path=None):
+        # `exe_path` lets a caller point at a different AccuMate.exe than the
+        # hardcoded APP_EXE build (e.g. scenarios/regression.md G1/G3-G5's
+        # installer tests, which need to drive a freshly *installed* copy in
+        # Program Files/AppData rather than the raw Release build every
+        # other regression test uses). Defaults to APP_EXE when omitted, so
+        # existing callers are unaffected.
+        self.app = Application(backend=BACKEND).start(exe_path or APP_EXE)
         self._uia_app = None
         self._moved_to_secondary = False
 
