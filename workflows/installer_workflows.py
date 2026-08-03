@@ -11,8 +11,57 @@ Installing/uninstalling via this compiled installer does NOT touch the
 Release\\AccuMate.exe build that app/application.py's APP_EXE points at (that
 is the raw build output the rest of this repo's tests drive directly) - the
 installer's [Files] section copies that exe into Program Files/AppData, a
-separate location. So exercising real install/uninstall cycles here is safe
-and does not risk breaking any other regression test in this repo.
+separate location.
+
+*** CRITICAL, LIVE-CONFIRMED GOTCHA (do not repeat this mistake) ***
+The paragraph above about install/uninstall cycles being fully isolated
+from the rest of this repo's tests is only TRUE for the {app} (Program
+Files/AppData\\Local\\Guidant\\AccuMate\\<version>\\AccuMate.exe) executable
+itself - it is FALSE for the shared default-data directory. AccuMate.exe's
+own C++/MFC code resolves its bundled default files (DefaultAL4.dat,
+Default_DriverDB.dat) via a HARDCODED path formula -
+SHGetFolderPath(CSIDL_LOCAL_APPDATA) + "Guidant\\AccuMate\\" + AppVersion,
+i.e. "%LOCALAPPDATA%\\Guidant\\AccuMate\\<version>\\" - NOT relative to its
+own exe directory, and NOT via any Windows registry "install path" key.
+This is confirmed both by AccuMateIVInstallerScript.iss's own [Files]/
+[Icons] sections (which deliberately copy DefaultAL4.dat/
+Default_DriverDB.dat into "{******appdata}\\Guidant\\AccuMate\\{#AppVersion}\\"
+and set shortcut WorkingDir there too, regardless of {app}'s actual install
+location) and by live testing: EVERY copy of AccuMate.exe that shares the
+same AppVersion (1.12) - whether the raw Release\\AccuMate.exe dev build
+this repo's other tests drive, or a real installed copy - reads its
+default config from that SAME shared AppData folder and refuses to start
+at all ("Unable to find DefaultAL4.dat. AccuMate can not start.") if it's
+missing.
+
+A prior session ran `Remove-Item -Recurse -Force
+"...\\AppData\\Local\\Guidant\\AccuMate\\1.12"` to clean up a broken
+partial-install test artifact, not realizing this folder is ALSO the raw
+dev build's own required default-data location - this broke every single
+test in the entire repo that launches AccuMateApp() (not just the
+installer tests) until DefaultAL4.dat/Default_DriverDB.dat were manually
+restored (copied from the sibling repo's
+AccuMate\\DefaultAL4.dat/Default_DriverDB.dat source files, which are the
+same files the installer itself bundles).
+
+**NEVER delete or recursively wipe
+"%LOCALAPPDATA%\\Guidant\\AccuMate\\<version>\\" as part of any
+install/uninstall test cleanup.** If a test needs to remove a broken
+partial *install* (i.e. the {app} exe/uninstaller under Program
+Files/AppData\\Local\\Guidant\\AccuMate\\<version>\\ - see
+CURRENT_USER_INSTALL_ROOT below, which happens to be the exact same path
+prefix), only ever remove specific known-installer-only artifacts
+(AccuMate.exe, unins*.exe, the Start Menu folder) - never the whole
+version directory - or better, restore DefaultAL4.dat/Default_DriverDB.dat
+immediately afterward from the sibling installer repo's own AccuMate\\
+source folder if a wipe is truly unavoidable.
+
+So exercising real install/uninstall cycles here is safe for the {app}
+executable location, but real uninstalls (run_uninstaller()) may remove
+files from this SAME shared AppData directory - always verify
+DefaultAL4.dat/Default_DriverDB.dat still exist there afterward (and
+restore them immediately if not) before considering any install/uninstall
+test cycle complete.
 
 Wizard flow confirmed via live probe (see tests/unit_test_installer_probe.py)
 for a regular (non-admin) user - "Install for current user" path:
@@ -87,6 +136,9 @@ KNOWN INSTALLER BUG (discovered live 2026-07-23, NOT a bug in this repo):
     detects the loop defensively (bounded retries) and raises
     `OldVersionLoopBug` with the same explanation if it happens anyway.
 """
+import os
+import shutil
+import tempfile
 import time
 import winreg
 
@@ -394,8 +446,6 @@ def get_current_user_start_menu_dir(app_version):
     """Return the expected Start Menu folder for an "Install for current
     user" install - matches the .iss script's [Icons] entries using
     {userstartmenu}\\Guidant\\AccuMate\\{#AppVersion}."""
-    import os
-
     return os.path.expandvars(
         rf"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Guidant\AccuMate\{app_version}"
     )
@@ -407,7 +457,86 @@ def run_uninstaller(uninstall_exe, timeout=60):
     completion: "Confirm Uninstall" (Yes) -> waits for the process to exit.
     Returns once the uninstall completes. Raises if the confirmation dialog
     or its Yes button can't be found.
+
+    SAFETY NET (see this module's "CRITICAL, LIVE-CONFIRMED GOTCHA" docstring
+    section): a "current user" install's directory
+    (get_current_user_install_dir()) is the SAME
+    "%LOCALAPPDATA%\\Guidant\\AccuMate\\<version>\\" folder that DefaultAL4.dat/
+    Default_DriverDB.dat live in for ANY copy of AccuMate.exe sharing that
+    version (including the raw dev build every other regression test in this
+    repo drives) - and the .iss script's [Files] entries for those two
+    default-data files do NOT carry `uninsneveruninstall`, so a real
+    uninstall WILL delete them, breaking every other test in the repo until
+    they're restored. This function backs both files up before uninstalling
+    and restores them afterward (success or failure) automatically, so
+    callers never have to remember to do this themselves.
     """
+    install_dir = os.path.dirname(uninstall_exe)
+    _backed_up = _backup_shared_default_files(install_dir)
+    try:
+        return _run_uninstaller_impl(uninstall_exe, timeout=timeout)
+    finally:
+        _restore_shared_default_files(install_dir, _backed_up)
+
+
+# The two default-data files AccuMate.exe (any copy, any version-matching
+# install) requires at startup - see this module's "CRITICAL,
+# LIVE-CONFIRMED GOTCHA" docstring section. Sourced from the installer's
+# own source tree if missing/deleted, since those are the same files the
+# installer itself bundles.
+_SHARED_DEFAULT_DATA_FILES = ["DefaultAL4.dat", "Default_DriverDB.dat"]
+_INSTALLER_SOURCE_DEFAULT_DATA_DIR = (
+    r"C:\Users\allenma\SoftwareDevelopment\acculoadiv.AccuMate\AccuMate"
+)
+
+
+def _backup_shared_default_files(install_dir):
+    """Copy DefaultAL4.dat/Default_DriverDB.dat out of install_dir to a
+    temp backup location before an uninstall runs, so they can be restored
+    afterward regardless of whether the uninstaller deletes them. Returns a
+    dict of {filename: backup_path} for files that existed and were backed
+    up."""
+    backups = {}
+    backup_dir = tempfile.mkdtemp(prefix="accumate_default_data_backup_")
+    for filename in _SHARED_DEFAULT_DATA_FILES:
+        src = os.path.join(install_dir, filename)
+        if os.path.isfile(src):
+            dst = os.path.join(backup_dir, filename)
+            shutil.copy2(src, dst)
+            backups[filename] = dst
+    return backups
+
+
+def _restore_shared_default_files(install_dir, backups):
+    """
+    Ensure DefaultAL4.dat/Default_DriverDB.dat exist in install_dir after an
+    uninstall, restoring from (in priority order) the pre-uninstall backup
+    taken by _backup_shared_default_files(), or the installer's own source
+    tree as a last resort. Never raises - prints a warning if a file can't
+    be restored by either means, since a missing default file breaks every
+    AccuMateApp() launch in the repo, not just installer tests.
+    """
+    os.makedirs(install_dir, exist_ok=True)
+    for filename in _SHARED_DEFAULT_DATA_FILES:
+        dst = os.path.join(install_dir, filename)
+        if os.path.isfile(dst):
+            continue
+        src = backups.get(filename)
+        if src is None or not os.path.isfile(src):
+            src = os.path.join(_INSTALLER_SOURCE_DEFAULT_DATA_DIR, filename)
+        if os.path.isfile(src):
+            shutil.copy2(src, dst)
+            print(f"[INFO] Restored shared default-data file {dst} (from {src})")
+        else:
+            print(
+                f"[WARN] Could not restore {dst} - no backup and no source "
+                f"file found at {src}. Every AccuMateApp() launch that "
+                "shares this version's AppData folder will fail to start "
+                "until this file is restored manually."
+            )
+
+
+def _run_uninstaller_impl(uninstall_exe, timeout=60):
     Application(backend="win32").start(uninstall_exe)
 
     win = None
