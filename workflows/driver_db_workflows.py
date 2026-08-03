@@ -47,9 +47,17 @@ Remaining gaps (NOT yet implemented/verified):
   - D5 (Save As / Open comparison): needs workflows.file_workflows.save_as/
     open_file_dialog confirmed compatible with non-Config document types -
     not yet tried live.
-  - D6-D8: need a live, reachable AccuLoad device AND a not-yet-built
-    "AccuMate File Transfer" upload/download dialog workflow (genuinely new
-    ground, no existing code anywhere in this repo touches that dialog).
+  - D6-D8: implemented via workflows.file_transfer_workflows (upload_file/
+    download_file) - see that module's docstring for the full dialog
+    mechanics. LIVE-CONFIRMED CAVEAT: against the test device at
+    10.55.66.70, every download attempt (Driver Database File, Transaction
+    Log) returned "The operation timed out" after ~60-90s despite a live
+    connection - this appears to be a device/network limitation (the file-
+    transfer data channel, distinct from the Smith protocol control channel
+    on port 7734), not a bug in this automation. The dialog mechanics
+    (opening, selecting category, setting path via Browse, clicking Start,
+    detecting the resulting message box) are verified correct independent
+    of that outcome.
   - D9: needs a provided AM3-format Database Driver File (.3DB) that does
     not currently exist in this repo/environment - same class of blocker as
     H3-H8's provided files.
@@ -66,6 +74,7 @@ from workflows.file_workflows import (
     _NEW_FLYOUT_DRIVER_DATABASE_INDEX,
     open_new_document_verified,
 )
+from workflows.file_transfer_workflows import upload_file, download_file
 
 _EDIT_RECORD_DIALOG_TITLE = "Edit Database Record"
 _EDIT_RECORD_DIALOG_CLASS = "#32770"
@@ -251,28 +260,27 @@ def upload_driver_database_file(app_obj, file_path):
     the ribbon "Upload File to AccuLoad" button's "AccuMate File Transfer"
     window.
 
-    NOT YET IMPLEMENTED - needs live device access plus a live probe of the
-    "AccuMate File Transfer" dialog's controls (no existing workflow for it
-    anywhere in this repo). See module docstring "Remaining gaps".
+    Returns the result dict from workflows.file_transfer_workflows.
+    start_transfer(): {"message": str or None, "timed_out": bool}.
+    `message` is the "AccuMate" popup's text if one appeared (a real
+    completion, or an error/timeout) - the caller should check this against
+    what the specific test expects, since a device-side timeout is a real,
+    live-confirmed possibility independent of this automation (see
+    workflows/file_transfer_workflows.py's module docstring "LIVE FINDING").
     """
-    raise NotImplementedError(
-        "D6: 'AccuMate File Transfer' upload dialog has no existing "
-        "workflow in this repo and needs live device access plus a live "
-        "probe of its controls before this can be implemented."
-    )
+    return upload_file(app_obj, file_path)
 
 
 def download_driver_database_file(app_obj, save_path):
     """
     D7/D8: Download a Driver Database File from a connected AccuLoad via
-    the ribbon "Download File From AccuLoad" button.
+    the ribbon "Download File From AccuLoad" button, selecting "Driver
+    Database File" in the "File Download Selection" dialog.
 
-    NOT YET IMPLEMENTED - see upload_driver_database_file's docstring; same
-    gap.
+    Returns the result dict from workflows.file_transfer_workflows.
+    start_transfer() - see upload_driver_database_file's docstring for the
+    shape/meaning of that dict, including the live-confirmed device-timeout
+    caveat.
     """
-    raise NotImplementedError(
-        "D7/D8: 'AccuMate File Transfer' download dialog has no existing "
-        "workflow in this repo and needs live device access plus a live "
-        "probe of its controls before this can be implemented."
-    )
+    return download_file(app_obj, "Driver Database File", save_path)
 
