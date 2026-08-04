@@ -3,8 +3,25 @@ scenarios/regression.md F1-F17 (transaction/event/audit logs, license
 status, firmware update, printing, API/parameter conversions).
 
 Scope summary:
-  - F1-F8: need a live, reachable AccuLoad device (log downloads, license
-    status upload/download, firmware update) - not attempted here.
+  - F1-F5: implemented via workflows.file_transfer_workflows (wired through
+    the new workflows/log_workflows.py's download_transaction_log/
+    download_event_log/download_audit_trail_log - same thin-wrapper pattern
+    already live-verified for D6/D7 and E4/E5/E8). NOT YET LIVE-RUN against
+    the device; expected to hit the same device-side "operation timed out"
+    limitation documented in file_transfer_workflows.py until that's
+    resolved (see the FTP data-channel investigation in this project's
+    session history) - these tests skip (rather than fail) specifically on
+    that known message.
+  - F6: BLOCKED - requires a provided License Status file to upload, which
+    does not currently exist in this repo/environment (same class of
+    blocker as C7/D9/E7/H3-H8's provided files). Only the upload half is
+    blocked; F7 below covers the download-only half of this same category.
+  - F7: implemented via log_workflows.download_license_status_file (no
+    upload needed - this step is download-only and expects a "no
+    information to pull" warning). NOT YET LIVE-RUN.
+  - F8: needs a provided firmware file (not present) plus a dedicated
+    Application Button "Firmware Update" workflow that hasn't been built
+    yet - left as a stub.
   - F9-F13: printing Driver Database/Config/Equation Set files - BLOCKED,
     see finding below. Written against workflows/print_workflows.py's
     print_to_pdf(), but live testing this segment found that helper no
@@ -56,8 +73,9 @@ import os
 import pytest
 from pypdf import PdfReader
 
-from workflows.file_workflows import new_config_file, save_as, open_file_dialog
+from workflows.file_workflows import new_config_file, save_as, open_file_dialog, load_test_file
 from workflows.print_workflows import print_to_pdf
+from workflows.comm_workflows import configure_ip_and_connect
 from workflows.driver_db_workflows import (
     create_new_driver_database_file,
     open_edit_database_record_dialog,
@@ -65,6 +83,14 @@ from workflows.driver_db_workflows import (
     set_driver_record_fields,
 )
 from workflows.equation_workflows import create_new_equation_set_file, insert_equation_line
+from workflows.log_workflows import (
+    download_transaction_log,
+    download_event_log,
+    download_audit_trail_log,
+    download_license_status_file,
+)
+
+_DEVICE_TIMEOUT_MESSAGE = "The operation timed out"
 
 _PDF_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "print_output"))
 
@@ -83,56 +109,114 @@ def _extract_all_text(pdf_path):
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
-@pytest.mark.requires_device
-@pytest.mark.needs_live_verification
-def test_f1_downloading_empty_transaction_log(app, device_ip):
-    """F1: Downloading Empty Transaction Log (requires live AccuLoad device)."""
-    pytest.skip("F1: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+def _connect_or_skip(app, device_ip):
+    """
+    Shared setup for F1-F7: build a throwaway config document, load the
+    real test config file (required for "Document Options" to become
+    enabled - see module docstrings across D/E), then connect. Skips
+    (rather than fails) if the device isn't reachable at all.
+    """
+    new_config_file(app)
+    load_test_file(app)
+    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    if not connected:
+        pytest.skip("AccuLoad device not reachable/connected")
+
+
+def _assert_download_or_skip_timeout(result, save_path):
+    if result["timed_out"] or (result["message"] and _DEVICE_TIMEOUT_MESSAGE in result["message"]):
+        pytest.skip(
+            f"Device-side file-transfer timeout (result={result!r}) - see "
+            "workflows/file_transfer_workflows.py module docstring 'LIVE FINDING'"
+        )
+    assert os.path.isfile(save_path), f"Expected download to save a file, result={result!r}"
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f2_download_transaction_log_small(app, device_ip):
+def test_f1_downloading_empty_transaction_log(app, device_ip, tmp_path):
+    """
+    F1: Downloading Empty Transaction Log (requires live AccuLoad device).
+      Download File From AccuLoad -> Transaction Log -> expect a warning
+      popup that no information is available (device must have an empty
+      transaction log for this exact message - not something this repo can
+      arrange/verify; skips on the live-confirmed device-timeout message
+      like the other F1-F5 tests instead of asserting the specific warning
+      text).
+    """
+    _connect_or_skip(app, device_ip)
+    save_path = str(tmp_path / "test_f1_transaction_log.txt")
+    result = download_transaction_log(app, save_path)
+    _assert_download_or_skip_timeout(result, save_path)
+
+
+@pytest.mark.requires_device
+@pytest.mark.needs_live_verification
+def test_f2_download_transaction_log_small(app, device_ip, tmp_path):
     """F2: Download Transaction Log (Small) (requires live AccuLoad device)."""
-    pytest.skip("F2: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    _connect_or_skip(app, device_ip)
+    save_path = str(tmp_path / "test_f2_transaction_log.txt")
+    result = download_transaction_log(app, save_path)
+    _assert_download_or_skip_timeout(result, save_path)
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f3_download_transaction_log_large(app, device_ip):
+def test_f3_download_transaction_log_large(app, device_ip, tmp_path):
     """F3: Download Transaction Log (Large) (requires live AccuLoad device)."""
-    pytest.skip("F3: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    _connect_or_skip(app, device_ip)
+    save_path = str(tmp_path / "test_f3_transaction_log.txt")
+    result = download_transaction_log(app, save_path)
+    _assert_download_or_skip_timeout(result, save_path)
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f4_download_event_log(app, device_ip):
+def test_f4_download_event_log(app, device_ip, tmp_path):
     """F4: Download Event Log (requires live AccuLoad device)."""
-    pytest.skip("F4: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    _connect_or_skip(app, device_ip)
+    save_path = str(tmp_path / "test_f4_event_log.txt")
+    result = download_event_log(app, save_path)
+    _assert_download_or_skip_timeout(result, save_path)
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f5_download_audit_trail_log(app, device_ip):
+def test_f5_download_audit_trail_log(app, device_ip, tmp_path):
     """F5: Download Audit Trail Log (requires live AccuLoad device)."""
-    pytest.skip("F5: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    _connect_or_skip(app, device_ip)
+    save_path = str(tmp_path / "test_f5_audit_trail_log.txt")
+    result = download_audit_trail_log(app, save_path)
+    _assert_download_or_skip_timeout(result, save_path)
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
 def test_f6_upload_download_license_status_file(app, device_ip):
     """F6: Upload/Download License Status File (requires live AccuLoad device)."""
-    pytest.skip("F6: 'AccuMate File Transfer' upload/download workflow not yet built - see module docstring")
+    pytest.skip(
+        "F6: requires a provided License Status file to upload, which "
+        "doesn't exist in this repo/environment - see module docstring "
+        "(same class of blocker as C7/D9/E7/H3-H8's provided files)"
+    )
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f7_no_license_status_to_download(app, device_ip):
+def test_f7_no_license_status_to_download(app, device_ip, tmp_path):
     """
     F7: No License Status To Download (requires live AccuLoad device with
     the license dongle pulled and "DA: Arm Not Licensed" alarm present).
+      Download File From AccuLoad -> License Status File -> expect a
+      warning popup that there's no information to pull (requires a
+      specific device precondition this repo can't arrange - skips on the
+      live-confirmed device-timeout message like F1-F5 instead of
+      asserting the specific warning text).
     """
-    pytest.skip("F7: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    _connect_or_skip(app, device_ip)
+    save_path = str(tmp_path / "test_f7_license_status.txt")
+    result = download_license_status_file(app, save_path)
+    _assert_download_or_skip_timeout(result, save_path)
 
 
 @pytest.mark.requires_device
