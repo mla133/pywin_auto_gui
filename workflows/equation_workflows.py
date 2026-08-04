@@ -36,9 +36,13 @@ Live-verified findings:
     save + reopen round-trip produces identical grid rows.
 
 Remaining gaps (NOT yet implemented/verified):
-  - E4-E6/E8: need a live, reachable AccuLoad device AND a not-yet-built
-    "AccuMate File Transfer" upload/download dialog workflow (same shared
-    gap as driver_db_workflows.py's D6-D8).
+  - E4-E6/E8: wired to workflows/file_transfer_workflows.py (shared upload/
+    download dialog module) - see upload_equation_file/download_equation_file
+    below. Live-verified: the dialog mechanics work correctly, but every
+    real transfer attempt against the live device at 10.55.66.70 has ended
+    with a device-side "The operation timed out" popup (same limitation
+    documented in driver_db_workflows.py D6/D7) - not yet seen a genuinely
+    successful transfer to confirm the completion-message path end-to-end.
   - E7: needs a provided AM3-format Equation Set File (.EQX) that does not
     currently exist in this repo/environment - same class of blocker as
     H3-H8's provided files.
@@ -56,6 +60,7 @@ from workflows.file_workflows import (
     _NEW_FLYOUT_EQUATION_SET_INDEX,
     open_new_document_verified,
 )
+from workflows.file_transfer_workflows import upload_file, download_file
 
 _EDIT_EQUATION_LINE_DIALOG_TITLE = "Edit Equation Line"
 _EDIT_EQUATION_LINE_DIALOG_CLASS = "#32770"
@@ -165,27 +170,23 @@ def upload_equation_file(app_obj, file_path):
     ribbon "Upload File to AccuLoad" button's "AccuMate File Transfer"
     window.
 
-    NOT YET IMPLEMENTED - needs live device access plus a live probe of the
-    "AccuMate File Transfer" dialog's controls (shared gap with
-    driver_db_workflows.upload_driver_database_file). See module docstring
-    "Remaining gaps".
+    Returns the result dict from workflows.file_transfer_workflows.
+    start_transfer(): {"message": str or None, "timed_out": bool}. See
+    driver_db_workflows.upload_driver_database_file's docstring for the
+    shape/meaning of that dict, including the live-confirmed
+    device-transfer-timeout caveat.
     """
-    raise NotImplementedError(
-        "E4: 'AccuMate File Transfer' upload dialog has no existing "
-        "workflow in this repo and needs live device access plus a live "
-        "probe of its controls before this can be implemented."
-    )
+    return upload_file(app_obj, file_path)
 
 
 def download_equation_file(app_obj, save_path):
     """
     E5/E6: Download an Equation File from a connected AccuLoad via the
-    ribbon "Download File From AccuLoad" button.
+    ribbon "Download File From AccuLoad" button, selecting "Equations File"
+    in the "File Download Selection" dialog.
 
-    NOT YET IMPLEMENTED - see upload_equation_file's docstring; same gap.
+    Returns the result dict from workflows.file_transfer_workflows.
+    start_transfer() - see upload_equation_file's docstring for the
+    shape/meaning of that dict.
     """
-    raise NotImplementedError(
-        "E5/E6: 'AccuMate File Transfer' download dialog has no existing "
-        "workflow in this repo and needs live device access plus a live "
-        "probe of its controls before this can be implemented."
-    )
+    return download_file(app_obj, "Equations File", save_path)

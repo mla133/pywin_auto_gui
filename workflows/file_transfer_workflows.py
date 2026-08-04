@@ -315,7 +315,7 @@ def _browse_and_set_path(transfer_dlg, path, is_save, timeout):
             pass
 
 
-def start_transfer(transfer_dlg, timeout=90, poll_interval=2):
+def start_transfer(transfer_dlg, timeout=90, poll_interval=2, on_intermediate_dialog=None):
     """
     Click "Start" on an "AccuMate File Transfer" dialog (path must already
     be set via set_upload_file_path/set_download_save_path - Start stays
@@ -323,6 +323,17 @@ def start_transfer(transfer_dlg, timeout=90, poll_interval=2):
       - a plain "AccuMate" message box appears (success/warning/error - see
         below), or
       - `timeout` seconds elapse with no such message box.
+
+    `on_intermediate_dialog`, if given, is a callable(win32_wrapper) invoked
+    once per poll for any OTHER new top-level "#32770" dialog that appears
+    during the transfer (i.e. neither `transfer_dlg` itself nor the final
+    "AccuMate" message box) - e.g. Report Files' "Select Report" dialog
+    (see report_workflows.upload_report_file/download_report_file), which
+    pops up mid-transfer to ask which report slot the file belongs to. The
+    callback is responsible for resolving/closing that dialog (e.g.
+    selecting an option and OK'ing it); polling then continues unchanged.
+    NOT needed/used for Driver Database, Equation, Translation, or Log
+    transfers, which have no such intermediate dialog.
 
     Returns a dict: {"message": str or None, "timed_out": bool}. `message`
     is the text of the "AccuMate" popup if one appeared (e.g. "The
@@ -355,12 +366,14 @@ def start_transfer(transfer_dlg, timeout=90, poll_interval=2):
     start_btn.click_input()
 
     app = Application(backend="win32").connect(process=transfer_dlg.process_id())
+    transfer_handle = transfer_dlg.handle
     end = time.time() + timeout
     while time.time() < end:
         time.sleep(poll_interval)
         for w in app.windows():
             try:
-                if w.window_text() == "AccuMate" and w.class_name() == _DIALOG_CLASS:
+                title = w.window_text()
+                if title == "AccuMate" and w.class_name() == _DIALOG_CLASS:
                     message = None
                     for ctrl in w.children(recurse=True):
                         try:
@@ -371,6 +384,14 @@ def start_transfer(transfer_dlg, timeout=90, poll_interval=2):
                             continue
                     print(f"[INFO] 'AccuMate' message box appeared: {message!r}")
                     return {"message": message, "timed_out": False}
+                if (
+                    on_intermediate_dialog is not None
+                    and w.class_name() == _DIALOG_CLASS
+                    and w.handle != transfer_handle
+                    and title not in ("", "AccuMate")
+                ):
+                    print(f"[STEP] Intermediate dialog appeared during transfer: {title!r}")
+                    on_intermediate_dialog(w)
             except Exception:
                 continue
 
@@ -405,18 +426,20 @@ def close_transfer_dialog(transfer_dlg):
     time.sleep(0.5)
 
 
-def upload_file(app_obj, file_path, timeout=90):
+def upload_file(app_obj, file_path, timeout=90, on_intermediate_dialog=None):
     """
     High-level helper: open the Upload File Transfer dialog, set
     `file_path`, click Start, wait for a result message, then close the
     dialog. Returns the same dict as start_transfer(). Dismisses any
     trailing "AccuMate" message box and the transfer dialog itself before
-    returning, regardless of outcome.
+    returning, regardless of outcome. `on_intermediate_dialog` is passed
+    through to start_transfer() - see its docstring (used by Report Files'
+    "Select Report" dialog).
     """
     dlg = open_upload_dialog(app_obj)
     try:
         set_upload_file_path(dlg, file_path)
-        result = start_transfer(dlg, timeout=timeout)
+        result = start_transfer(dlg, timeout=timeout, on_intermediate_dialog=on_intermediate_dialog)
         return result
     finally:
         dismiss_message_box(app_obj)
@@ -426,18 +449,20 @@ def upload_file(app_obj, file_path, timeout=90):
             print(f"[WARN] Failed to close File Transfer dialog: {e}")
 
 
-def download_file(app_obj, category, save_path, timeout=90):
+def download_file(app_obj, category, save_path, timeout=90, on_intermediate_dialog=None):
     """
     High-level helper: open the Download File Transfer dialog for
     `category` (see DOWNLOAD_CATEGORY_IDS), set `save_path`, click Start,
     wait for a result message, then close the dialog. Returns the same
     dict as start_transfer(). Dismisses any trailing "AccuMate" message box
     and the transfer dialog itself before returning, regardless of outcome.
+    `on_intermediate_dialog` is passed through to start_transfer() - see
+    its docstring (used by Report Files' "Select Report" dialog).
     """
     dlg = open_download_dialog(app_obj, category)
     try:
         set_download_save_path(dlg, save_path)
-        result = start_transfer(dlg, timeout=timeout)
+        result = start_transfer(dlg, timeout=timeout, on_intermediate_dialog=on_intermediate_dialog)
         return result
     finally:
         dismiss_message_box(app_obj)

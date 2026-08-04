@@ -132,11 +132,20 @@ Live-verified findings:
     place items on a resized canvas.
 
 Remaining gaps (NOT yet implemented/verified):
-  - B4-B14: need a live, reachable AccuLoad device AND a not-yet-built
-    "AccuMate File Transfer" upload/download dialog workflow (same shared
-    gap as driver_db_workflows.py's D6-D8/equation_workflows.py's E4-E6/E8).
-    B11/B12 additionally need provided AM3 (.RPX)/early-AM4 report files
-    not present in this repo/environment.
+  - B4-B14: wired to workflows/file_transfer_workflows.py's shared upload/
+    download dialog module (see upload_report_file/download_report_file
+    below), EXCEPT for one report-specific piece that has NOT yet been
+    live-probed: regression.md's B4/B13 describe an extra "Select Report"
+    dialog appearing mid-upload/download (after clicking Start) to pick
+    which report slot the file belongs to (e.g. "User Configured Report 1
+    - Transaction Report"). No exact dialog title/control-ids for this
+    have been confirmed live yet - _select_report_type() below is a
+    best-effort, title/id-agnostic implementation (matches by visible
+    control text) built from regression.md's step text alone. Treat
+    upload_report_file/download_report_file as UNCONFIRMED
+    (`needs_live_verification`) until a real run against a live device
+    exercises this path. B11/B12 additionally need provided AM3 (.RPX)/
+    early-AM4 report files not present in this repo/environment.
   - B27 (shrink page size with an existing item now out of range): the
     Ticket #3644 bug above blocks placing an item via the dialog after any
     resize, and reliably landing a dragged item beyond a shrunk page's new
@@ -162,6 +171,7 @@ from workflows.file_workflows import (
     _NEW_FLYOUT_REPORT_CONFIGURATION_INDEX,
     open_new_document_verified,
 )
+from workflows.file_transfer_workflows import upload_file, download_file
 
 _EDIT_REPORT_ITEM_DIALOG_TITLE = "Edit Report Item"
 _EDIT_REPORT_ITEM_DIALOG_CLASS = "#32770"
@@ -718,6 +728,62 @@ def set_report_number_of_pages(app_obj, num_pages):
     time.sleep(1.0)
 
 
+def _select_report_type(dlg_wrapper, report_type, timeout=10):
+    """
+    Resolve regression.md B4/B13's "Select Report" dialog, which appears
+    mid-upload/download to ask which report slot the file belongs to
+    (e.g. "User Configured Report 1 - Transaction Report", "Batch Detail",
+    "Prove Report"). UNCONFIRMED/best-effort: no live probe of this
+    dialog's exact title/control-ids has been done yet (see module
+    docstring "Remaining gaps"), so this matches purely by visible control
+    text rather than a known automation_id/control_id, and clicks the
+    first Button-class control (by visual position, topmost first) whose
+    remaining text looks like an "OK"/affirmative commit button. Intended
+    to be passed as `on_intermediate_dialog` to
+    workflows.file_transfer_workflows.start_transfer()/upload_file()/
+    download_file().
+    """
+    print(f"[STEP] Selecting report type {report_type!r} in intermediate dialog")
+    deadline = time.time() + timeout
+    option_ctrl = None
+    while time.time() < deadline and option_ctrl is None:
+        for ctrl in dlg_wrapper.children(recurse=True):
+            try:
+                if report_type in ctrl.window_text():
+                    option_ctrl = ctrl
+                    break
+            except Exception:
+                continue
+        if option_ctrl is None:
+            time.sleep(0.5)
+
+    if option_ctrl is None:
+        raise RuntimeError(
+            f"Could not find a control matching report type {report_type!r} "
+            f"in dialog {dlg_wrapper.window_text()!r} - this dialog has not "
+            "been live-probed yet, see report_workflows.py module docstring."
+        )
+
+    option_ctrl.click_input()
+    time.sleep(0.3)
+
+    ok_ctrl = None
+    for ctrl in dlg_wrapper.children(recurse=True):
+        try:
+            if ctrl.class_name() == "Button" and ctrl.window_text().strip().lstrip("&") == "OK":
+                ok_ctrl = ctrl
+                break
+        except Exception:
+            continue
+    if ok_ctrl is None:
+        raise RuntimeError(
+            f"Could not find an 'OK' button on dialog {dlg_wrapper.window_text()!r} "
+            "to confirm the selected report type."
+        )
+    ok_ctrl.click_input()
+    time.sleep(0.5)
+
+
 def upload_report_file(app_obj, file_path, report_type):
     """
     B5/B7/B9: Upload a Report File (.al4rep) to a connected AccuLoad via
@@ -725,28 +791,32 @@ def upload_report_file(app_obj, file_path, report_type):
     window, then select `report_type` (e.g. "User Configured Report 1 -
     Transaction Report") in the resulting "Select Report" dialog.
 
-    NOT YET IMPLEMENTED - needs live device access plus a live probe of
-    the "AccuMate File Transfer" dialog's controls (shared gap with
-    driver_db_workflows.upload_driver_database_file /
-    equation_workflows.upload_equation_file). See module docstring
-    "Remaining gaps".
+    Returns the result dict from workflows.file_transfer_workflows.
+    start_transfer(): {"message": str or None, "timed_out": bool}.
+
+    UNCONFIRMED (needs_live_verification): the "Select Report" dialog
+    handling (_select_report_type) has not yet been live-verified against
+    a real device - see module docstring "Remaining gaps".
     """
-    raise NotImplementedError(
-        "B5/B7/B9: 'AccuMate File Transfer' upload dialog has no existing "
-        "workflow in this repo and needs live device access plus a live "
-        "probe of its controls before this can be implemented."
+    return upload_file(
+        app_obj, file_path,
+        on_intermediate_dialog=lambda w: _select_report_type(w, report_type),
     )
 
 
 def download_report_file(app_obj, save_path, report_type):
     """
     B6/B8/B10: Download a Report File from a connected AccuLoad via the
-    ribbon "Download File From AccuLoad" button, selecting `report_type`.
+    ribbon "Download File From AccuLoad" button, selecting "Report Files"
+    in the "File Download Selection" dialog, then `report_type` (e.g.
+    "User Configured Report 1 - Transaction Report") in the resulting
+    "Select Report" dialog.
 
-    NOT YET IMPLEMENTED - see upload_report_file's docstring; same gap.
+    Returns the result dict from workflows.file_transfer_workflows.
+    start_transfer() - see upload_report_file's docstring, including the
+    UNCONFIRMED "Select Report" dialog caveat.
     """
-    raise NotImplementedError(
-        "B6/B8/B10: 'AccuMate File Transfer' download dialog has no "
-        "existing workflow in this repo and needs live device access plus "
-        "a live probe of its controls before this can be implemented."
+    return download_file(
+        app_obj, "Report Files", save_path,
+        on_intermediate_dialog=lambda w: _select_report_type(w, report_type),
     )

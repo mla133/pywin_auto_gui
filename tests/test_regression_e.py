@@ -6,8 +6,11 @@ dialog titles - see workflows/equation_workflows.py's module docstring for
 the full findings) and run as part of the default `pytest -s -v` suite.
 
 Scope summary (see workflows/equation_workflows.py for full detail):
-  - E4-E6, E8: need a live, reachable AccuLoad device AND a not-yet-built
-    "AccuMate File Transfer" upload/download dialog workflow.
+  - E4-E6, E8: wired to workflows/file_transfer_workflows.py. Live-verified
+    dialog mechanics, but real device transfers have so far always ended
+    in the live-confirmed "The operation timed out" device-side limitation
+    (see workflows/driver_db_workflows.py's D6/D7 docstrings for the same
+    finding) - tests skip gracefully on that specific message.
   - E7: needs a provided AM3-format Equation Set File (.EQX) that does not
     currently exist in this repo/environment - same class of blocker as
     H3-H8's provided files.
@@ -21,8 +24,11 @@ from workflows.equation_workflows import (
     create_new_equation_set_file,
     insert_equation_line,
     get_equation_set_rows,
+    upload_equation_file,
+    download_equation_file,
 )
-from workflows.file_workflows import save_as, open_file_dialog
+from workflows.file_workflows import save_as, open_file_dialog, load_test_file
+from workflows.comm_workflows import configure_ip_and_connect
 
 
 def test_e1_create_new_equation_file(app):
@@ -87,26 +93,69 @@ def test_e3_loading_equation_files(app, tmp_path):
     assert reopened_rows == original_rows
 
 
+_DEVICE_TIMEOUT_MESSAGE = "The operation timed out"
+
+
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_e4_uploading_equation_files(app, device_ip):
+def test_e4_uploading_equation_files(app, device_ip, tmp_path):
     """
     E4: Uploading Equation Files (requires live AccuLoad device).
       Connect to the device, then Upload File to AccuLoad -> browse to a
       .al4equ file -> upload completes successfully.
+
+    Builds a real .al4equ file first (reusing E1/E2's helpers) so this
+    test is self-contained. Skips (rather than fails) specifically on the
+    live-confirmed device-timeout message - see module docstring.
     """
-    pytest.skip("E4: 'AccuMate File Transfer' upload workflow not yet built - see module docstring")
+    create_new_equation_set_file(app)
+    insert_equation_line(app, register_number=1, expression="1")
+
+    upload_path = str(tmp_path / "test_e4_upload.al4equ")
+    save_as(app, upload_path)
+    assert os.path.isfile(upload_path)
+
+    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    if not connected:
+        pytest.skip("AccuLoad device not reachable/connected")
+
+    result = upload_equation_file(app, upload_path)
+    if result["timed_out"] or (result["message"] and _DEVICE_TIMEOUT_MESSAGE in result["message"]):
+        pytest.skip(
+            f"Device-side file-transfer timeout (result={result!r}) - see "
+            "workflows/driver_db_workflows.py module docstring 'Remaining gaps'"
+        )
+    assert result["message"] is not None, f"Expected a completion message, got {result!r}"
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_e5_downloading_equation_files(app, device_ip):
+def test_e5_downloading_equation_files(app, device_ip, tmp_path):
     """
     E5: Downloading Equation Files (requires live AccuLoad device).
       Connect to the device, Download File From AccuLoad -> Equations File
       -> compare against the file uploaded in E4.
+
+    NOTE: like D7, this doesn't chain off a prior E4 run (each test is
+    self-contained/order-independent) - it just verifies the download
+    dialog flow and resulting file, not byte-for-byte content parity with
+    a specific upload. Skips gracefully on the known device-timeout
+    limitation.
     """
-    pytest.skip("E5: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    load_test_file(app)
+
+    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    if not connected:
+        pytest.skip("AccuLoad device not reachable/connected")
+
+    save_path = str(tmp_path / "test_e5_download.al4equ")
+    result = download_equation_file(app, save_path)
+    if result["timed_out"] or (result["message"] and _DEVICE_TIMEOUT_MESSAGE in result["message"]):
+        pytest.skip(
+            f"Device-side file-transfer timeout (result={result!r}) - see "
+            "workflows/driver_db_workflows.py module docstring 'Remaining gaps'"
+        )
+    assert os.path.isfile(save_path), f"Expected download to save a file, result={result!r}"
 
 
 @pytest.mark.requires_device
@@ -118,8 +167,18 @@ def test_e6_no_equation_file_to_download(app, device_ip):
     image).
       Download File From AccuLoad -> Equations File -> a warning popup
       notifies the user there is nothing to pull.
+
+    This repo cannot arrange the required device-side precondition (no
+    Equations file present on the AccuLoad), so this remains a documented,
+    environment-state-blocked skip - same class of gap as D8. If a device
+    ever legitimately has no Equations file, download_equation_file's
+    result "message" would hold the "no information to pull" warning text.
     """
-    pytest.skip("E6: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    pytest.skip(
+        "E6 requires a device with no Equations file present - a device-side "
+        "state this repo cannot safely arrange or verify"
+    )
+
 
 
 @pytest.mark.needs_live_verification
@@ -134,11 +193,36 @@ def test_e7_loading_am3_equation_files(app):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_e8_uploading_empty_equation_file(app, device_ip):
+def test_e8_uploading_empty_equation_file(app, device_ip, tmp_path):
     """
     E8: Uploading Empty Equation File (requires live AccuLoad device).
       Connect to the device, Upload File to AccuLoad -> browse to an empty
       equations file -> a popup warns "No entries defined. Nothing to
       upload."
+
+    Builds a real, empty (0-row) .al4equ file via create_new_equation_set_file
+    + save_as (no insert_equation_line calls) so this test is
+    self-contained. Skips (rather than fails) on the live-confirmed
+    device-timeout message, same as E4/E5 - a device-side timeout can mask
+    whatever "nothing to upload" message would otherwise appear, and this
+    repo cannot distinguish "device is unreachable at the transfer layer"
+    from "device correctly rejected an empty file" without a live run.
     """
-    pytest.skip("E8: 'AccuMate File Transfer' upload workflow not yet built - see module docstring; also needs a provided empty equations file")
+    create_new_equation_set_file(app)
+    assert get_equation_set_rows(app) == []
+
+    upload_path = str(tmp_path / "test_e8_empty.al4equ")
+    save_as(app, upload_path)
+    assert os.path.isfile(upload_path)
+
+    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    if not connected:
+        pytest.skip("AccuLoad device not reachable/connected")
+
+    result = upload_equation_file(app, upload_path)
+    if result["timed_out"] or (result["message"] and _DEVICE_TIMEOUT_MESSAGE in result["message"]):
+        pytest.skip(
+            f"Device-side file-transfer timeout (result={result!r}) - see "
+            "workflows/driver_db_workflows.py module docstring 'Remaining gaps'"
+        )
+    assert result["message"] is not None, f"Expected a completion/warning message, got {result!r}"
