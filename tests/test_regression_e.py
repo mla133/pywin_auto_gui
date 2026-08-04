@@ -115,6 +115,12 @@ def test_e4_uploading_equation_files(app, device_ip, tmp_path):
     save_as(app, upload_path)
     assert os.path.isfile(upload_path)
 
+    # "Document Options" (Communications Settings) only becomes enabled
+    # once a real AL4 config document is loaded - a bare Equation Set
+    # document alone (created above) isn't enough, confirmed live (same
+    # gotcha documented in test_regression_d.py's D6).
+    load_test_file(app)
+
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
@@ -214,6 +220,9 @@ def test_e8_uploading_empty_equation_file(app, device_ip, tmp_path):
     upload_path = str(tmp_path / "test_e8_empty.al4equ")
     save_as(app, upload_path)
     assert os.path.isfile(upload_path)
+
+    # Same "Document Options" enablement gotcha as E4 - see its comment.
+    load_test_file(app)
 
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
     if not connected:
