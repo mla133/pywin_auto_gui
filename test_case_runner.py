@@ -40,8 +40,26 @@ Given that, this is a HYBRID runner, not a full auto-executor:
 Usage:
     python test_case_runner.py scenarios/ALIV-3929.md
     python test_case_runner.py scenarios/ALIV-3929.md --report results/ALIV-3929-report.md
+
+Bugfix regression convention:
+    Any "scenarios/ALIV-<number>.md" file (naming convention: the Jira
+    ticket ID for the bug it documents) is treated as a one-off, snap-in
+    bugfix regression case - written once when a bug is fixed/verified, then
+    available to be re-run standalone at any time, or as part of a full
+    bugfix-regression sweep, without needing to be folded into the curated
+    A-H regression.md test files. Discover/run them with:
+
+        python test_case_runner.py --list-bugfixes
+        python test_case_runner.py --bugfix ALIV-4085
+        python test_case_runner.py --all-bugfixes
+        python test_case_runner.py --all-bugfixes --report-dir scenarios/reports
+
+    New bugfix cases just need to be dropped into scenarios/ as
+    "ALIV-<number>.md" (same wiki-markup format as ALIV-3929.md) - no
+    registration step required, they're picked up automatically by name.
 """
 import argparse
+import glob
 import os
 import re
 import sys
@@ -52,6 +70,42 @@ import scenario_runner as sr
 from app.application import AccuMateApp
 from pages.main_page import MainPage
 from workflows.file_workflows import load_config_file
+
+
+# Naming convention for one-off, snap-in bugfix regression cases (see
+# module docstring "Bugfix regression convention"): any file matching this
+# glob under scenarios/ is auto-discovered, no registration needed.
+_BUGFIX_GLOB = "ALIV-*.md"
+_DEFAULT_SCENARIOS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenarios")
+
+
+def discover_bugfix_files(scenarios_dir=_DEFAULT_SCENARIOS_DIR):
+    """
+    Return a sorted list of full paths to bugfix regression Markdown files
+    (scenarios/ALIV-<number>.md) found in scenarios_dir. Excludes any
+    generated "-report.md" files that live alongside them.
+    """
+    pattern = os.path.join(scenarios_dir, _BUGFIX_GLOB)
+    files = [f for f in glob.glob(pattern) if not f.endswith("-report.md")]
+    return sorted(files)
+
+
+def resolve_bugfix_id(bugfix_id, scenarios_dir=_DEFAULT_SCENARIOS_DIR):
+    """
+    Resolve a bare bugfix ticket ID (e.g. "ALIV-4085" or "4085") to its
+    full scenarios/ALIV-<number>.md path. Raises FileNotFoundError with a
+    helpful message (including the list of known IDs) if no match exists.
+    """
+    candidate = bugfix_id if bugfix_id.upper().startswith("ALIV-") else f"ALIV-{bugfix_id}"
+    path = os.path.join(scenarios_dir, f"{candidate}.md")
+    if os.path.isfile(path):
+        return path
+
+    known = [os.path.splitext(os.path.basename(f))[0] for f in discover_bugfix_files(scenarios_dir)]
+    raise FileNotFoundError(
+        f"No bugfix scenario found for {bugfix_id!r} (looked for {path!r}). "
+        f"Known bugfix IDs: {', '.join(known) if known else '(none found)'}"
+    )
 
 
 _HEADER_RE = re.compile(r"^h([1-6])\.\s*(.*)$")
@@ -623,11 +677,78 @@ def _write_report(markdown_path, report_path, results):
     print(f"[INFO] Report written to {report_path}")
 
 
+def run_bugfix_batch(paths, report_dir=None):
+    """
+    Run several bugfix test case documents back-to-back (one AccuMate
+    process/run per file, sequentially - each still opens/tears down its
+    own app instance via run_test_case). Returns True only if every file's
+    steps were PASS/SKIP.
+    """
+    overall_success = True
+    per_file_results = []
+
+    for path in paths:
+        report_path = None
+        if report_dir is not None:
+            base = os.path.splitext(os.path.basename(path))[0]
+            report_path = os.path.join(report_dir, f"{base}-report.md")
+
+        print(f"\n{'=' * 70}\n[INFO] Running bugfix scenario: {path}\n{'=' * 70}")
+        ok = run_test_case(path, report_path)
+        per_file_results.append((path, ok))
+        overall_success = overall_success and ok
+
+    print(f"\n{'=' * 70}\n[INFO] Bugfix batch summary\n{'=' * 70}")
+    for path, ok in per_file_results:
+        print(f"  {'PASS' if ok else 'FAIL'}  {path}")
+
+    return overall_success
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("markdown_file", help="Path to a wiki-markup test case Markdown file")
+    parser.add_argument("markdown_file", nargs="?", default=None,
+                         help="Path to a wiki-markup test case Markdown file")
     parser.add_argument("--report", default=None, help="Path to write the results Markdown report to")
+    parser.add_argument("--bugfix", default=None, metavar="ALIV-<number>",
+                         help="Run a single bugfix scenario by ticket ID, e.g. --bugfix ALIV-4085 "
+                              "(resolves to scenarios/ALIV-4085.md)")
+    parser.add_argument("--all-bugfixes", action="store_true",
+                         help="Run every scenarios/ALIV-*.md bugfix scenario, one after another")
+    parser.add_argument("--list-bugfixes", action="store_true",
+                         help="List discovered scenarios/ALIV-*.md bugfix scenarios and exit")
+    parser.add_argument("--scenarios-dir", default=_DEFAULT_SCENARIOS_DIR,
+                         help="Directory to search for ALIV-*.md bugfix scenarios (default: scenarios/)")
+    parser.add_argument("--report-dir", default=None,
+                         help="Directory to write per-file reports to when running --all-bugfixes "
+                              "(default: alongside each input file)")
     args = parser.parse_args()
+
+    if args.list_bugfixes:
+        found = discover_bugfix_files(args.scenarios_dir)
+        if not found:
+            print(f"[INFO] No bugfix scenarios found in {args.scenarios_dir}")
+        else:
+            print(f"[INFO] Found {len(found)} bugfix scenario(s) in {args.scenarios_dir}:")
+            for f in found:
+                print(f"  {os.path.splitext(os.path.basename(f))[0]}")
+        sys.exit(0)
+
+    if args.all_bugfixes:
+        found = discover_bugfix_files(args.scenarios_dir)
+        if not found:
+            print(f"[WARN] No bugfix scenarios found in {args.scenarios_dir}")
+            sys.exit(0)
+        success = run_bugfix_batch(found, args.report_dir)
+        sys.exit(0 if success else 1)
+
+    if args.bugfix:
+        target = resolve_bugfix_id(args.bugfix, args.scenarios_dir)
+        success = run_test_case(target, args.report)
+        sys.exit(0 if success else 1)
+
+    if not args.markdown_file:
+        parser.error("markdown_file is required unless --bugfix/--all-bugfixes/--list-bugfixes is used")
 
     success = run_test_case(args.markdown_file, args.report)
     sys.exit(0 if success else 1)

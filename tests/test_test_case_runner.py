@@ -8,9 +8,12 @@ is collected by default (matches pytest.ini's python_files = test_*.py).
 """
 import os
 
+import pytest
+
 import test_case_runner as tcr
 
 ALIV_3929_PATH = os.path.join(os.path.dirname(__file__), "..", "scenarios", "ALIV-3929.md")
+SCENARIOS_DIR = os.path.join(os.path.dirname(__file__), "..", "scenarios")
 
 
 def test_parse_test_case_document_skips_preamble_before_first_h4():
@@ -280,3 +283,50 @@ def test_auto_check_value_clauses_skips_compound_ampersand_clause():
     # A compound "both X & Y" clause is skipped entirely, not guessed at.
     assert checks == []
 
+
+
+# --- Bugfix scenario discovery/resolution (ALIV-*.md convention) ---
+# The discovery glob itself is generic ("ALIV-*.md" - see _BUGFIX_GLOB in
+# test_case_runner.py), matching any ALIV-<number>.md file dropped into
+# scenarios/ with no per-file registration needed. These tests exercise
+# that generic behavior against the real fixture files currently checked
+# into scenarios/ (ALIV-3929.md, ALIV-4085.md) purely as concrete examples.
+
+
+def test_discover_bugfix_files_finds_any_aliv_numbered_file():
+    found = tcr.discover_bugfix_files(SCENARIOS_DIR)
+    names = [os.path.splitext(os.path.basename(f))[0] for f in found]
+
+    # Every ALIV-<number>.md file present must be discovered - not just a
+    # single hardcoded ticket - and no generated "-report.md" file should
+    # ever be included.
+    assert "ALIV-3929" in names
+    assert "ALIV-4085" in names
+    assert all(not f.endswith("-report.md") for f in found)
+
+
+def test_discover_bugfix_files_returns_sorted_list():
+    found = tcr.discover_bugfix_files(SCENARIOS_DIR)
+    assert found == sorted(found)
+
+
+def test_resolve_bugfix_id_accepts_bare_ticket_id():
+    resolved = tcr.resolve_bugfix_id("ALIV-3929", SCENARIOS_DIR)
+    assert os.path.normpath(resolved) == os.path.normpath(ALIV_3929_PATH)
+
+
+def test_resolve_bugfix_id_accepts_number_only():
+    resolved = tcr.resolve_bugfix_id("3929", SCENARIOS_DIR)
+    assert os.path.normpath(resolved) == os.path.normpath(ALIV_3929_PATH)
+
+
+def test_resolve_bugfix_id_works_for_any_matching_ticket_not_just_one():
+    # Confirms resolution isn't special-cased to a single ticket number.
+    resolved = tcr.resolve_bugfix_id("ALIV-4085", SCENARIOS_DIR)
+    expected = os.path.join(SCENARIOS_DIR, "ALIV-4085.md")
+    assert os.path.normpath(resolved) == os.path.normpath(expected)
+
+
+def test_resolve_bugfix_id_raises_helpful_error_for_unknown_id():
+    with pytest.raises(FileNotFoundError, match="ALIV-3929"):
+        tcr.resolve_bugfix_id("ALIV-9999", SCENARIOS_DIR)

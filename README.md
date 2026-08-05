@@ -83,7 +83,7 @@ pywin_auto_gui/
 ├── scenarios/                  # Markdown test documents (manual + automatable)
 │   ├── regression.md           # the master manual regression test document
 │   ├── example_*.md            # scenario_runner.py usage examples
-│   └── ALIV-*.md               # formal Jira/Confluence-exported test-case docs
+│   └── ALIV-*.md               # snap-in bugfix regression cases (see "Bugfix regression cases" below)
 │
 ├── scenario_runner.py          # Standalone: run a plain-English Markdown scenario
 ├── test_case_runner.py         # Standalone: hybrid auto/manual runner for formal test docs
@@ -485,6 +485,37 @@ Screenshot/teardown failures are swallowed (logged as `[WARN]`) so they
 never mask the real test failure, and the app process is always
 force-killed (`taskkill /PID <pid> /F /T`) to avoid orphaned processes
 between runs.
+
+---
+
+# 🐛 Bugfix regression cases (ALIV-*.md)
+
+Any `scenarios/ALIV-<ticket-number>.md` file (same wiki-markup format as
+`ALIV-3929.md`, run via `test_case_runner.py`) is a **one-off bugfix
+regression case** - written once, when a specific bug is fixed and
+verified, then available to snap back in and re-run at any time without
+being folded into the curated `regression.md` A-H sections. No
+registration step is needed: drop a new `ALIV-<number>.md` file into
+`scenarios/` and it's auto-discovered by filename.
+
+```bash
+# List every bugfix scenario currently checked into scenarios/
+python test_case_runner.py --list-bugfixes
+
+# Run a single bugfix case by ticket ID (resolves to scenarios/ALIV-4085.md)
+python test_case_runner.py --bugfix ALIV-4085
+
+# Run every ALIV-*.md bugfix scenario back-to-back
+python test_case_runner.py --all-bugfixes
+
+# ...writing each one's report to a dedicated directory instead of next to the input file
+python test_case_runner.py --all-bugfixes --report-dir scenarios/reports
+```
+
+Each file still runs through the same hybrid auto/manual step engine as
+any other `test_case_runner.py` document (see below) - fully-automatable
+steps run unattended, everything else pauses for a human verdict - and a
+Markdown report is written out per file.
 
 ---
 
