@@ -537,6 +537,11 @@ def test_b4_uploading_empty_report_file(app, device_ip, tmp_path):
     save_as(app, upload_path)
     assert os.path.isfile(upload_path)
 
+    # "Document Options" only becomes enabled once a real AL4 config
+    # document is loaded - the bare Report Configuration document created
+    # above isn't enough (same gotcha confirmed live for D6/E4/E8).
+    load_test_file(app)
+
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
@@ -560,6 +565,8 @@ def test_b5_uploading_report_files_transaction_report(app, device_ip, tmp_path):
     upload_path = str(tmp_path / "test_b5_upload.al4rep")
     save_as(app, upload_path)
     assert os.path.isfile(upload_path)
+
+    load_test_file(app)
 
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
     if not connected:
@@ -604,6 +611,8 @@ def test_b7_uploading_report_files_batch_report(app, device_ip, tmp_path):
     save_as(app, upload_path)
     assert os.path.isfile(upload_path)
 
+    load_test_file(app)
+
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
@@ -639,6 +648,8 @@ def test_b9_uploading_report_files_prove_report(app, device_ip, tmp_path):
     upload_path = str(tmp_path / "test_b9_upload.al4rep")
     save_as(app, upload_path)
     assert os.path.isfile(upload_path)
+
+    load_test_file(app)
 
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
     if not connected:
@@ -692,11 +703,15 @@ def test_b13_upload_download_multiple_times(app, device_ip, tmp_path):
     B13: Upload/Download Multiple Times (requires live AccuLoad device).
       Upload a report file, then download it back and confirm a file was
       produced; repeat with a second, distinct report file/type.
-    """
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
-    if not connected:
-        pytest.skip("AccuLoad device not reachable/connected")
 
+    Reloads the real test config file (load_test_file) and reconnects
+    before each iteration's upload/download - creating a new bare Report
+    Configuration document (create_new_report_file) switches the current
+    document away from the connected AL4 config, which disables the
+    Upload/Download ribbon buttons the same way it disables "Document
+    Options" (confirmed live for B4/B5/B7/B9) - so the connection/document
+    state must be re-established each round, not just once up front.
+    """
     for i, report_type in enumerate(
         ["User Configured Report 1 - Transaction Report", "User Configured Report 2 - Batch Detail"]
     ):
@@ -707,9 +722,25 @@ def test_b13_upload_download_multiple_times(app, device_ip, tmp_path):
         save_as(app, upload_path)
         assert os.path.isfile(upload_path)
 
+        load_test_file(app)
+        connected = configure_ip_and_connect(app, device_ip, timeout=15)
+        if not connected:
+            pytest.skip("AccuLoad device not reachable/connected")
+
         upload_result = upload_report_file(app, upload_path, report_type)
         _skip_on_device_timeout(upload_result)
         assert upload_result["message"] is not None, f"Expected a completion message, got {upload_result!r}"
+
+        # Re-verify the connection before downloading - live testing showed
+        # the connection can drop/settle differently after an upload
+        # attempt (e.g. an app-side "Unable to create output file." error),
+        # leaving "Download File From AccuLoad" disabled even though the
+        # upload step itself didn't fail. Connect first, then download -
+        # never assume the prior upload's connection is still live.
+        if not app.wait_for_device_connection(timeout=15):
+            connected = configure_ip_and_connect(app, device_ip, timeout=15)
+            if not connected:
+                pytest.skip("AccuLoad device not reachable/connected before download")
 
         download_path = str(tmp_path / f"test_b13_download_{i}.al4rep")
         download_result = download_report_file(app, download_path, report_type)

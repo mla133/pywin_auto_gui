@@ -174,12 +174,18 @@ def _wait_for_dialog(app_obj, title, timeout=10):
     raise RuntimeError(f"'{title}' dialog did not appear within {timeout}s")
 
 
-def open_upload_dialog(app_obj, timeout=10):
+def open_upload_dialog(app_obj, timeout=20):
     """
     Click the ribbon "Upload File to AccuLoad" button and return the
     resulting "AccuMate File Transfer" dialog (win32 wrapper). Raises if the
     ribbon button is disabled (device not connected) or the dialog never
     appears.
+
+    `timeout` defaults to 20s (not the usual 10s) - live testing showed the
+    dialog can take longer than 10s to appear immediately after a fresh
+    "Retry Comm"/reconnect, while AccuMate's UI thread is still settling
+    (same class of timing gotcha as open_communications_settings' retry
+    logic).
     """
     uia_win = app_obj.get_uia_window()
     if not is_ribbon_button_enabled(uia_win, "Upload File to AccuLoad"):
@@ -194,13 +200,63 @@ def open_upload_dialog(app_obj, timeout=10):
     return _wait_for_dialog(app_obj, _FILE_TRANSFER_DIALOG_TITLE, timeout=timeout)
 
 
-def open_download_dialog(app_obj, category, timeout=10):
+def _wait_for_dialog_with_intermediate(app_obj, title, exclude_handles, on_intermediate_dialog, timeout=10):
+    """
+    Like _wait_for_dialog, but tolerates one or more OTHER new top-level
+    "#32770" dialogs appearing first (any dialog whose handle isn't in
+    `exclude_handles` and whose title isn't "" or the target `title`) -
+    e.g. Report Files' "Select Report" dialog, which (for downloads, unlike
+    uploads) appears right after the "File Download Selection" dialog is
+    OK'd and BEFORE the "AccuMate File Transfer" dialog shows (see
+    regression.md B6 step 5 vs. B5 step 5 - downloads resolve the report
+    type up front, uploads resolve it mid-transfer after Start is clicked).
+    `on_intermediate_dialog`, if given, is called once per such dialog to
+    resolve/close it; polling then continues for `title`. If
+    `on_intermediate_dialog` is None, any such dialog is ignored (left
+    open) and this just waits for `title` as before.
+    """
+    end = time.time() + timeout
+    handled_handles = set()
+    while time.time() < end:
+        dlg = _find_dialog_by_title(app_obj, title)
+        if dlg is not None:
+            return dlg
+        if on_intermediate_dialog is not None:
+            for w in app_obj.app.windows():
+                try:
+                    if (
+                        w.class_name() == _DIALOG_CLASS
+                        and w.handle not in exclude_handles
+                        and w.handle not in handled_handles
+                        and w.window_text() not in ("", title)
+                    ):
+                        print(f"[STEP] Intermediate dialog appeared before '{title}': {w.window_text()!r}")
+                        handled_handles.add(w.handle)
+                        on_intermediate_dialog(w)
+                except Exception:
+                    continue
+        time.sleep(0.5)
+    raise RuntimeError(f"'{title}' dialog did not appear within {timeout}s")
+
+
+def open_download_dialog(app_obj, category, timeout=20, on_intermediate_dialog=None):
     """
     Click the ribbon "Download File From AccuLoad" button, select
     `category` (a key of DOWNLOAD_CATEGORY_IDS, e.g. "Transaction Log",
     "Driver Database File") in the "File Download Selection" dialog, click
     OK, and return the resulting "AccuMate File Transfer" dialog (win32
     wrapper).
+
+    `timeout` defaults to 20s (not the usual 10s) - see open_upload_dialog's
+    docstring for why (applies equally here for the wait after OK'ing the
+    "File Download Selection" dialog).
+
+    `on_intermediate_dialog`, if given, is a callable(win32_wrapper) invoked
+    for any OTHER new "#32770" dialog that appears between OK'ing the
+    selection dialog and the File Transfer dialog showing - used by Report
+    Files' "Select Report" dialog (see report_workflows.download_report_file),
+    which (unlike the upload flow) appears at this point rather than
+    mid-transfer. Not needed/used for any other category.
 
     Raises if the ribbon button is disabled, `category` is not a known key,
     or either dialog never appears.
@@ -233,7 +289,12 @@ def open_download_dialog(app_obj, category, timeout=10):
         raise RuntimeError("OK button not found on 'File Download Selection' dialog")
     ok_btn.click_input()
 
-    return _wait_for_dialog(app_obj, _FILE_TRANSFER_DIALOG_TITLE, timeout=timeout)
+    return _wait_for_dialog_with_intermediate(
+        app_obj, _FILE_TRANSFER_DIALOG_TITLE,
+        exclude_handles={selection_dlg.handle},
+        on_intermediate_dialog=on_intermediate_dialog,
+        timeout=timeout,
+    )
 
 
 def set_upload_file_path(transfer_dlg, file_path, timeout=10):
@@ -456,13 +517,19 @@ def download_file(app_obj, category, save_path, timeout=90, on_intermediate_dial
     wait for a result message, then close the dialog. Returns the same
     dict as start_transfer(). Dismisses any trailing "AccuMate" message box
     and the transfer dialog itself before returning, regardless of outcome.
-    `on_intermediate_dialog` is passed through to start_transfer() - see
-    its docstring (used by Report Files' "Select Report" dialog).
+
+    `on_intermediate_dialog` is passed through to open_download_dialog()
+    (NOT start_transfer, unlike upload_file) - Report Files' "Select
+    Report" dialog appears right after OK'ing the "File Download
+    Selection" dialog and BEFORE the "AccuMate File Transfer" dialog shows
+    for downloads (regression.md B6 step 5), unlike uploads where it
+    appears mid-transfer after Start is clicked (B5 step 5). See
+    open_download_dialog()'s docstring.
     """
-    dlg = open_download_dialog(app_obj, category)
+    dlg = open_download_dialog(app_obj, category, on_intermediate_dialog=on_intermediate_dialog)
     try:
         set_download_save_path(dlg, save_path)
-        result = start_transfer(dlg, timeout=timeout, on_intermediate_dialog=on_intermediate_dialog)
+        result = start_transfer(dlg, timeout=timeout)
         return result
     finally:
         dismiss_message_box(app_obj)
