@@ -522,7 +522,7 @@ def _skip_on_device_timeout(result):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_b4_uploading_empty_report_file(app, device_ip, tmp_path):
+def test_b4_uploading_empty_report_file(app_ftp, device_ip, tmp_path):
     """
     B4: Uploading Empty Report File (requires live AccuLoad device).
       Create a new, empty Report Configuration, save it, then Upload File
@@ -530,6 +530,7 @@ def test_b4_uploading_empty_report_file(app, device_ip, tmp_path):
       Report" in the "Select Report" dialog -> expect the "No entries
       defined. Nothing to upload." warning.
     """
+    app = app_ftp
     create_new_report_file(app)
     assert get_report_items(app) == []
 
@@ -553,12 +554,13 @@ def test_b4_uploading_empty_report_file(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_b5_uploading_report_files_transaction_report(app, device_ip, tmp_path):
+def test_b5_uploading_report_files_transaction_report(app_ftp, device_ip, tmp_path):
     """
     B5: Uploading Report Files - Transaction Report (requires live
     AccuLoad device). Builds a real report file (with one inserted item)
     so this test is self-contained.
     """
+    app = app_ftp
     create_new_report_file(app)
     insert_report_item(app, item_type=ITEM_TYPE_USER_TEXT, item_value="Hello", line=1, column=1)
 
@@ -579,7 +581,7 @@ def test_b5_uploading_report_files_transaction_report(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_b6_downloading_report_files_transaction_report(app, device_ip, tmp_path):
+def test_b6_downloading_report_files_transaction_report(app_ftp, device_ip, tmp_path):
     """
     B6: Downloading Report Files - Transaction Report (requires live
     AccuLoad device). NOTE: like D7/E5, this is self-contained/order-
@@ -588,6 +590,7 @@ def test_b6_downloading_report_files_transaction_report(app, device_ip, tmp_path
     itself documents that comparison as a known-failing case, ticket
     #3861).
     """
+    app = app_ftp
     load_test_file(app)
 
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
@@ -602,8 +605,9 @@ def test_b6_downloading_report_files_transaction_report(app, device_ip, tmp_path
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_b7_uploading_report_files_batch_report(app, device_ip, tmp_path):
+def test_b7_uploading_report_files_batch_report(app_ftp, device_ip, tmp_path):
     """B7: Uploading Report Files - Batch Report (requires live AccuLoad device)."""
+    app = app_ftp
     create_new_report_file(app)
     insert_report_item(app, item_type=ITEM_TYPE_USER_TEXT, item_value="Hello", line=1, column=1)
 
@@ -624,8 +628,9 @@ def test_b7_uploading_report_files_batch_report(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_b8_downloading_report_files_batch_report(app, device_ip, tmp_path):
+def test_b8_downloading_report_files_batch_report(app_ftp, device_ip, tmp_path):
     """B8: Downloading Report Files - Batch Report (requires live AccuLoad device)."""
+    app = app_ftp
     load_test_file(app)
 
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
@@ -640,8 +645,9 @@ def test_b8_downloading_report_files_batch_report(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_b9_uploading_report_files_prove_report(app, device_ip, tmp_path):
+def test_b9_uploading_report_files_prove_report(app_ftp, device_ip, tmp_path):
     """B9: Uploading Report Files - Prove Report (requires live AccuLoad device)."""
+    app = app_ftp
     create_new_report_file(app)
     insert_report_item(app, item_type=ITEM_TYPE_USER_TEXT, item_value="Hello", line=1, column=1)
 
@@ -662,8 +668,9 @@ def test_b9_uploading_report_files_prove_report(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_b10_downloading_report_files_prove_report(app, device_ip, tmp_path):
+def test_b10_downloading_report_files_prove_report(app_ftp, device_ip, tmp_path):
     """B10: Downloading Report Files - Prove Report (requires live AccuLoad device)."""
+    app = app_ftp
     load_test_file(app)
 
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
@@ -698,7 +705,7 @@ def test_b12_loading_early_am4_report_files(app):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_b13_upload_download_multiple_times(app, device_ip, tmp_path):
+def test_b13_upload_download_multiple_times(app_ftp, device_ip, tmp_path):
     """
     B13: Upload/Download Multiple Times (requires live AccuLoad device).
       Upload a report file, then download it back and confirm a file was
@@ -712,6 +719,7 @@ def test_b13_upload_download_multiple_times(app, device_ip, tmp_path):
     Options" (confirmed live for B4/B5/B7/B9) - so the connection/document
     state must be re-established each round, not just once up front.
     """
+    app = app_ftp
     for i, report_type in enumerate(
         ["User Configured Report 1 - Transaction Report", "User Configured Report 2 - Batch Detail"]
     ):

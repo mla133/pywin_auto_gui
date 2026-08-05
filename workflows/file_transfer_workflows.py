@@ -82,7 +82,8 @@ strings** for several seconds at a time (confirmed live) - this is the
 app's UI thread being busy servicing the socket, not a hung/crashed
 process. Don't treat a single blank read as a failure; keep polling.
 
-*** LIVE FINDING (environment limitation, not an automation bug): the test
+*** LIVE FINDING (RESOLVED 2026-08-05 - was an environment limitation, not
+an automation bug, and not a device/network limitation either): the test
 device at 10.55.66.70 consistently returned "The operation timed out" (a
 plain "AccuMate" message box, class "#32770", with an "OK" button at
 control id 2 and the message itself in a Static at control id 65535) for
@@ -91,14 +92,19 @@ EVERY download category tried (Driver Database File, Transaction Log) after
 connection throughout. This is a DIFFERENT failure mode than regression.md's
 documented "no information to pull from the AccuLoad" warning (an expected,
 different popup for several B/C/D/E sections when a category is genuinely
-empty on the device) - a timeout suggests the file-transfer data channel
-itself isn't reachable/enabled on this device/network path, even though the
-Smith protocol control channel (port 7734) is. Live-verifying D6-D8/F1-F8/
-B4-B10/B13-14/E4-E6/E8 end-to-end (i.e. an ACTUAL successful transfer, not
-just this dialog automation) may require a device/network configuration
-change outside this repo's control. The dialog automation itself (up
-through clicking Start and observing the resulting status/message) is
-verified correct independent of that.
+empty on the device). ROOT CAUSE: a corporate firewall/network policy
+blocks the actual FTP data channel specifically when AccuMate.exe is
+launched from this repo's raw `Release/` build output folder - the Smith
+protocol control channel (port 7734) and FTP control channel (port 21) both
+connect fine regardless, masking the issue until the data channel itself is
+exercised. Launching the exact same binary (confirmed identical file size)
+from its *installed* location instead (`app.application.APP_EXE_INSTALLED`,
+via `AccuMateApp(exe_path=...)` / the `app_ftp` fixture in `conftest.py`) -
+after accepting the one-time Windows Firewall prompt for that path -
+completes real transfers successfully; confirmed live end-to-end for D6
+(upload), D7 (download), and B5 (upload with intermediate "Select Report"
+dialog). Any test performing a real transfer should use the `app_ftp`
+fixture, not the plain `app` fixture.
 """
 import os
 import time

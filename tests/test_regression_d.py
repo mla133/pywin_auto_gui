@@ -172,7 +172,7 @@ _DEVICE_TIMEOUT_MESSAGE = "The operation timed out"
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_d6_uploading_driver_database_files(app, device_ip, tmp_path):
+def test_d6_uploading_driver_database_files(app_ftp, device_ip, tmp_path):
     """
     D6: Uploading Driver Database Files (requires live AccuLoad device).
       Connect to the device, then Upload File to AccuLoad -> browse to a
@@ -183,6 +183,7 @@ def test_d6_uploading_driver_database_files(app, device_ip, tmp_path):
     externally-provided file. Skips (rather than fails) specifically on the
     live-confirmed device-timeout message - see module docstring.
     """
+    app = app_ftp
     create_new_driver_database_file(app)
     win32_dlg, uia_dlg = open_edit_database_record_dialog(app, row_index=0)
     enter_hid_format_id(app, win32_dlg, uia_dlg, extended_code="1", facility_code="2", card_number="1234")
@@ -213,7 +214,7 @@ def test_d6_uploading_driver_database_files(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_d7_downloading_driver_database_files(app, device_ip, tmp_path):
+def test_d7_downloading_driver_database_files(app_ftp, device_ip, tmp_path):
     """
     D7: Downloading Driver Database Files (requires live AccuLoad device).
       Connect to the device, Download File From AccuLoad -> Driver Database
@@ -223,6 +224,7 @@ def test_d7_downloading_driver_database_files(app, device_ip, tmp_path):
     Skips (rather than fails) specifically on the live-confirmed
     device-timeout message - see module docstring.
     """
+    app = app_ftp
     load_test_file(app)
 
     connected = configure_ip_and_connect(app, device_ip, timeout=15)

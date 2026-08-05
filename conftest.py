@@ -2,7 +2,7 @@ import pytest
 import subprocess
 import os
 from datetime import datetime
-from app.application import AccuMateApp
+from app.application import AccuMateApp, APP_EXE_INSTALLED
 from workflows.accuload_web import AccuLoadWebSession
 
 # Fallback AccuMate config used when --accumate-config-file isn't passed. This
@@ -126,28 +126,23 @@ def accuload_web(device_ip):
         yield web
 
 
-@pytest.fixture(scope="function")
-def app(request):
-    app_instance = AccuMateApp()
-    app_instance.test_name = request.node.name
-
-    yield app_instance
-
+def _teardown_app(app_instance, test_name):
+    """
+    Shared teardown for the `app`/`app_ftp` fixtures: screenshot then
+    force-kill, swallowing exceptions so a teardown failure never masks
+    the real test failure/result.
+    """
     print("\n[DEBUG] Taking screenshot before teardown...")
 
     try:
         win = app_instance.get_window()
 
-        # Generate a timestamped filename
-        test_name = request.node.name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{test_name}_{timestamp}.png"
         path = f"screenshots/{filename}"
 
-        # Ensure folder exists
         os.makedirs("screenshots", exist_ok=True)
 
-        # Capture screenshot
         win.capture_as_image().save(path)
 
         print(f"[DEBUG] Screenshot saved: {path}")
@@ -168,3 +163,38 @@ def app(request):
 
     except Exception as e:
         print(f"[WARN] Failed to kill process: {e}")
+
+
+@pytest.fixture(scope="function")
+def app(request):
+    app_instance = AccuMateApp()
+    app_instance.test_name = request.node.name
+
+    yield app_instance
+
+    _teardown_app(app_instance, request.node.name)
+
+
+@pytest.fixture(scope="function")
+def app_ftp(request):
+    """
+    Like `app`, but launches AccuMate from its *installed* location
+    (app.application.APP_EXE_INSTALLED) instead of the raw build output
+    folder (APP_EXE) - required for any test that performs a real device
+    file transfer (upload/download). Live-confirmed (2026-08-05): a
+    corporate firewall/network policy blocks the actual FTP data channel
+    when launched from APP_EXE, causing every transfer to hit a device-side
+    "The operation timed out" ~60-90s after Start even though the control
+    connection is genuinely live; the identical binary launched from
+    APP_EXE_INSTALLED instead completes real transfers successfully (after
+    allowing the Windows Firewall prompt for that path once). Use this
+    fixture for D6-D8/E4-E6/B4-B10/B13-B14/F1-F8 style tests; keep using
+    plain `app` for everything else (it's unaffected and there's no reason
+    to add the installed build's dependency where it isn't needed).
+    """
+    app_instance = AccuMateApp(exe_path=APP_EXE_INSTALLED)
+    app_instance.test_name = request.node.name
+
+    yield app_instance
+
+    _teardown_app(app_instance, request.node.name)

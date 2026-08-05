@@ -316,6 +316,21 @@ dialog via `_select_report_type`).
 > external to this repo. Tests that exercise real transfers check for this
 > exact message and skip (not fail) when they see it.
 
+> **RESOLVED (2026-08-05):** the "operation timed out" message above traced
+> back to a corporate firewall/network policy that blocks real FTP file
+> transfers specifically when AccuMate.exe is launched from this repo's raw
+> `Release/` build output folder — not a device, network, or automation bug.
+> Launching the *exact same binary* from its installed location
+> (`app.application.APP_EXE_INSTALLED`, e.g.
+> `C:\Users\<user>\AppData\Local\Guidant\AccuMate\1.12\AccuMate.exe`) instead
+> completes real transfers successfully (confirmed live for D6/D7/B5), once
+> the one-time Windows Firewall prompt for that path is accepted. Any test
+> that performs a real upload/download should request the `app_ftp` fixture
+> (see `conftest.py`) instead of the plain `app` fixture — everything else
+> (document editing, non-transfer ribbon actions) should keep using `app`
+> against the Release build as before.
+
+
 ---
 
 # 🧪 Example: a full pytest test

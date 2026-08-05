@@ -98,7 +98,7 @@ _DEVICE_TIMEOUT_MESSAGE = "The operation timed out"
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_e4_uploading_equation_files(app, device_ip, tmp_path):
+def test_e4_uploading_equation_files(app_ftp, device_ip, tmp_path):
     """
     E4: Uploading Equation Files (requires live AccuLoad device).
       Connect to the device, then Upload File to AccuLoad -> browse to a
@@ -108,6 +108,7 @@ def test_e4_uploading_equation_files(app, device_ip, tmp_path):
     test is self-contained. Skips (rather than fails) specifically on the
     live-confirmed device-timeout message - see module docstring.
     """
+    app = app_ftp
     create_new_equation_set_file(app)
     insert_equation_line(app, register_number=1, expression="1")
 
@@ -136,7 +137,7 @@ def test_e4_uploading_equation_files(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_e5_downloading_equation_files(app, device_ip, tmp_path):
+def test_e5_downloading_equation_files(app_ftp, device_ip, tmp_path):
     """
     E5: Downloading Equation Files (requires live AccuLoad device).
       Connect to the device, Download File From AccuLoad -> Equations File
@@ -148,6 +149,7 @@ def test_e5_downloading_equation_files(app, device_ip, tmp_path):
     a specific upload. Skips gracefully on the known device-timeout
     limitation.
     """
+    app = app_ftp
     load_test_file(app)
 
     connected = configure_ip_and_connect(app, device_ip, timeout=15)
@@ -199,7 +201,7 @@ def test_e7_loading_am3_equation_files(app):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_e8_uploading_empty_equation_file(app, device_ip, tmp_path):
+def test_e8_uploading_empty_equation_file(app_ftp, device_ip, tmp_path):
     """
     E8: Uploading Empty Equation File (requires live AccuLoad device).
       Connect to the device, Upload File to AccuLoad -> browse to an empty
@@ -214,6 +216,7 @@ def test_e8_uploading_empty_equation_file(app, device_ip, tmp_path):
     repo cannot distinguish "device is unreachable at the transfer layer"
     from "device correctly rejected an empty file" without a live run.
     """
+    app = app_ftp
     create_new_equation_set_file(app)
     assert get_equation_set_rows(app) == []
 

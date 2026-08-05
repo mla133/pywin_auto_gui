@@ -4,6 +4,24 @@ import time
 
 APP_TITLE = "AccuMate for AccuLoad"
 APP_EXE = r"C:\\Users\\allenma\\SoftwareDevelopment\\acculoadiv.AccuMate\\Release\\AccuMate.exe"
+
+# Live-confirmed (2026-08-05): a corporate network/firewall policy blocks
+# the actual FTP file-transfer data channel when AccuMate.exe is launched
+# from the raw build output folder above (APP_EXE), causing every real
+# device file transfer (Driver Database/Equation/Report/Log/License
+# upload+download - regression.md B/D/E/F sections) to hit a device-side
+# "The operation timed out" message ~60-90s after clicking Start, even
+# though the Smith protocol control connection (port 7734) and FTP control
+# channel (port 21) both connect fine. Launching the exact same binary
+# (confirmed identical file size) from its *installed* location below
+# instead - allowing the Windows Firewall prompt that appears the first
+# time this path is run - completes real transfers successfully. The
+# policy is apparently scoped to the executable's filesystem path, not the
+# binary itself. Use APP_EXE_INSTALLED (see AccuMateApp's exe_path param,
+# and conftest.py's `app_ftp` fixture) for any test that performs a real
+# upload/download; keep using the default APP_EXE for everything else.
+APP_EXE_INSTALLED = r"C:\\Users\\allenma\\AppData\\Local\\Guidant\\AccuMate\\1.12\\AccuMate.exe"
+
 BACKEND = "win32"
 
 # Once a config file is loaded, the main frame's title changes to

@@ -134,7 +134,7 @@ def _assert_download_or_skip_timeout(result, save_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f1_downloading_empty_transaction_log(app, device_ip, tmp_path):
+def test_f1_downloading_empty_transaction_log(app_ftp, device_ip, tmp_path):
     """
     F1: Downloading Empty Transaction Log (requires live AccuLoad device).
       Download File From AccuLoad -> Transaction Log -> expect a warning
@@ -144,6 +144,7 @@ def test_f1_downloading_empty_transaction_log(app, device_ip, tmp_path):
       like the other F1-F5 tests instead of asserting the specific warning
       text).
     """
+    app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f1_transaction_log.txt")
     result = download_transaction_log(app, save_path)
@@ -152,8 +153,9 @@ def test_f1_downloading_empty_transaction_log(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f2_download_transaction_log_small(app, device_ip, tmp_path):
+def test_f2_download_transaction_log_small(app_ftp, device_ip, tmp_path):
     """F2: Download Transaction Log (Small) (requires live AccuLoad device)."""
+    app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f2_transaction_log.txt")
     result = download_transaction_log(app, save_path)
@@ -162,8 +164,9 @@ def test_f2_download_transaction_log_small(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f3_download_transaction_log_large(app, device_ip, tmp_path):
+def test_f3_download_transaction_log_large(app_ftp, device_ip, tmp_path):
     """F3: Download Transaction Log (Large) (requires live AccuLoad device)."""
+    app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f3_transaction_log.txt")
     result = download_transaction_log(app, save_path)
@@ -172,8 +175,9 @@ def test_f3_download_transaction_log_large(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f4_download_event_log(app, device_ip, tmp_path):
+def test_f4_download_event_log(app_ftp, device_ip, tmp_path):
     """F4: Download Event Log (requires live AccuLoad device)."""
+    app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f4_event_log.txt")
     result = download_event_log(app, save_path)
@@ -182,8 +186,9 @@ def test_f4_download_event_log(app, device_ip, tmp_path):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f5_download_audit_trail_log(app, device_ip, tmp_path):
+def test_f5_download_audit_trail_log(app_ftp, device_ip, tmp_path):
     """F5: Download Audit Trail Log (requires live AccuLoad device)."""
+    app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f5_audit_trail_log.txt")
     result = download_audit_trail_log(app, save_path)
@@ -203,7 +208,7 @@ def test_f6_upload_download_license_status_file(app, device_ip):
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_f7_no_license_status_to_download(app, device_ip, tmp_path):
+def test_f7_no_license_status_to_download(app_ftp, device_ip, tmp_path):
     """
     F7: No License Status To Download (requires live AccuLoad device with
     the license dongle pulled and "DA: Arm Not Licensed" alarm present).
@@ -213,6 +218,7 @@ def test_f7_no_license_status_to_download(app, device_ip, tmp_path):
       live-confirmed device-timeout message like F1-F5 instead of
       asserting the specific warning text).
     """
+    app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f7_license_status.txt")
     result = download_license_status_file(app, save_path)
