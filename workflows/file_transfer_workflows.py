@@ -151,7 +151,13 @@ _OVERWRITE_CONFIRM_YES_ID = 6
 
 
 def _find_dialog_by_title(app_obj, title):
-    for w in app_obj.app.windows():
+    try:
+        windows = app_obj.app.windows()
+    except Exception:
+        # Transient: a window can close mid-enumeration (invalid handle) -
+        # treat like "not found yet", caller polls again.
+        return None
+    for w in windows:
         try:
             if w.window_text() == title and w.class_name() == _DIALOG_CLASS:
                 return w
@@ -180,6 +186,25 @@ def _wait_for_dialog(app_obj, title, timeout=10):
     raise RuntimeError(f"'{title}' dialog did not appear within {timeout}s")
 
 
+def _wait_for_ribbon_enabled(uia_win, button_name, timeout=5):
+    """
+    Poll for `button_name` to report enabled, rather than a single instant
+    check. Live testing (B13) showed "Download File From AccuLoad" can
+    briefly stay disabled for a second or two right after a real upload
+    completes (the app settling post-transfer), even though a broader
+    connectivity check (e.g. AccuMateApp.is_device_connected(), which
+    checks a DIFFERENT ribbon button - "Pull All From AccuLoad") already
+    reports connected. Returns True/False; never raises.
+    """
+    end = time.time() + timeout
+    while True:
+        if is_ribbon_button_enabled(uia_win, button_name):
+            return True
+        if time.time() >= end:
+            return False
+        time.sleep(0.5)
+
+
 def open_upload_dialog(app_obj, timeout=20):
     """
     Click the ribbon "Upload File to AccuLoad" button and return the
@@ -194,7 +219,7 @@ def open_upload_dialog(app_obj, timeout=20):
     logic).
     """
     uia_win = app_obj.get_uia_window()
-    if not is_ribbon_button_enabled(uia_win, "Upload File to AccuLoad"):
+    if not _wait_for_ribbon_enabled(uia_win, "Upload File to AccuLoad"):
         raise RuntimeError(
             "'Upload File to AccuLoad' ribbon button is disabled - device "
             "likely not connected."
@@ -228,7 +253,11 @@ def _wait_for_dialog_with_intermediate(app_obj, title, exclude_handles, on_inter
         if dlg is not None:
             return dlg
         if on_intermediate_dialog is not None:
-            for w in app_obj.app.windows():
+            try:
+                windows = app_obj.app.windows()
+            except Exception:
+                windows = []
+            for w in windows:
                 try:
                     if (
                         w.class_name() == _DIALOG_CLASS
@@ -274,7 +303,7 @@ def open_download_dialog(app_obj, category, timeout=20, on_intermediate_dialog=N
         )
 
     uia_win = app_obj.get_uia_window()
-    if not is_ribbon_button_enabled(uia_win, "Download File From AccuLoad"):
+    if not _wait_for_ribbon_enabled(uia_win, "Download File From AccuLoad"):
         raise RuntimeError(
             "'Download File From AccuLoad' ribbon button is disabled - "
             "device likely not connected."
@@ -338,7 +367,15 @@ def _browse_and_set_path(transfer_dlg, path, is_save, timeout):
     common_dlg = None
     end = time.time() + timeout
     while time.time() < end and common_dlg is None:
-        for w in app.windows():
+        try:
+            windows = app.windows()
+        except Exception:
+            # Transient: a window can close mid-enumeration (invalid
+            # handle) - confirmed live during F3 - just retry the next
+            # poll rather than propagating.
+            time.sleep(0.3)
+            continue
+        for w in windows:
             try:
                 if w.window_text() == common_dlg_title and w.class_name() == _DIALOG_CLASS:
                     common_dlg = w
@@ -437,7 +474,11 @@ def start_transfer(transfer_dlg, timeout=90, poll_interval=2, on_intermediate_di
     end = time.time() + timeout
     while time.time() < end:
         time.sleep(poll_interval)
-        for w in app.windows():
+        try:
+            windows = app.windows()
+        except Exception:
+            continue
+        for w in windows:
             try:
                 title = w.window_text()
                 if title == "AccuMate" and w.class_name() == _DIALOG_CLASS:

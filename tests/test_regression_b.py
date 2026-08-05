@@ -739,12 +739,19 @@ def test_b13_upload_download_multiple_times(app_ftp, device_ip, tmp_path):
         _skip_on_device_timeout(upload_result)
         assert upload_result["message"] is not None, f"Expected a completion message, got {upload_result!r}"
 
-        # Re-verify the connection before downloading - live testing showed
-        # the connection can drop/settle differently after an upload
-        # attempt (e.g. an app-side "Unable to create output file." error),
-        # leaving "Download File From AccuLoad" disabled even though the
-        # upload step itself didn't fail. Connect first, then download -
-        # never assume the prior upload's connection is still live.
+        # Re-load the test config file (not just re-check connectivity)
+        # before downloading. Live testing showed AccuMate's active tab can
+        # revert to the just-created bare Report Configuration document
+        # after a real upload completes/its dialogs are dismissed (visible
+        # in a teardown screenshot: the Report Configuration tab was active
+        # again, not the connected AL4 config tab), which grays out ALL
+        # device ribbon buttons ("Download File From AccuLoad" included)
+        # even though the app is still genuinely ONLINE - a tab-focus
+        # issue, not an actual disconnect. Reloading (load_test_file just
+        # switches to the already-open tab rather than opening a
+        # duplicate) re-activates the correct tab; reconnect only if that
+        # still isn't enough.
+        load_test_file(app)
         if not app.wait_for_device_connection(timeout=15):
             connected = configure_ip_and_connect(app, device_ip, timeout=15)
             if not connected:

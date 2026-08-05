@@ -91,6 +91,7 @@ from workflows.log_workflows import (
 )
 
 _DEVICE_TIMEOUT_MESSAGE = "The operation timed out"
+_NO_INFO_MESSAGE = "No information to pull from the AccuLoad."
 
 _PDF_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "print_output"))
 
@@ -132,44 +133,76 @@ def _assert_download_or_skip_timeout(result, save_path):
     assert os.path.isfile(save_path), f"Expected download to save a file, result={result!r}"
 
 
+def _skip_if_no_info_to_pull(result, what):
+    """
+    F2/F3 expect a genuinely populated (small/large) log on the device -
+    a device-state precondition this repo can't arrange (same class of
+    gap as D8/E6/B14's "no file present" skips). If the device reports
+    "No information to pull from the AccuLoad." instead (i.e. it
+    genuinely has no log of this type at all right now), skip rather than
+    fail - this isn't an automation bug, just a device state mismatch.
+    """
+    if result["message"] == _NO_INFO_MESSAGE:
+        pytest.skip(
+            f"Device currently has no {what} to pull (result={result!r}) - "
+            "a device-state precondition this repo can't arrange/verify"
+        )
+
+
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
 def test_f1_downloading_empty_transaction_log(app_ftp, device_ip, tmp_path):
     """
     F1: Downloading Empty Transaction Log (requires live AccuLoad device).
       Download File From AccuLoad -> Transaction Log -> expect a warning
-      popup that no information is available (device must have an empty
-      transaction log for this exact message - not something this repo can
-      arrange/verify; skips on the live-confirmed device-timeout message
-      like the other F1-F5 tests instead of asserting the specific warning
-      text).
+      popup that no information is available.
+
+    Live-verified (2026-08-05, once FTP transfers stopped hitting the
+    Release/-folder firewall block - see app_ftp fixture): the test device
+    genuinely has no transaction log right now, so it reliably returns
+    "No information to pull from the AccuLoad." - this IS the exact
+    expected result for F1's "empty" case, so it's asserted directly
+    rather than treated as a timeout/skip condition.
     """
     app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f1_transaction_log.txt")
     result = download_transaction_log(app, save_path)
-    _assert_download_or_skip_timeout(result, save_path)
+    if result["timed_out"] or (result["message"] and _DEVICE_TIMEOUT_MESSAGE in result["message"]):
+        pytest.skip(
+            f"Device-side file-transfer timeout (result={result!r}) - see "
+            "workflows/file_transfer_workflows.py module docstring 'LIVE FINDING'"
+        )
+    assert result["message"] == _NO_INFO_MESSAGE, f"Expected the 'no information' warning, got {result!r}"
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
 def test_f2_download_transaction_log_small(app_ftp, device_ip, tmp_path):
-    """F2: Download Transaction Log (Small) (requires live AccuLoad device)."""
+    """
+    F2: Download Transaction Log (Small) (requires live AccuLoad device
+    with a small-but-nonempty transaction log present).
+    """
     app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f2_transaction_log.txt")
     result = download_transaction_log(app, save_path)
+    _skip_if_no_info_to_pull(result, "transaction log")
     _assert_download_or_skip_timeout(result, save_path)
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
 def test_f3_download_transaction_log_large(app_ftp, device_ip, tmp_path):
-    """F3: Download Transaction Log (Large) (requires live AccuLoad device)."""
+    """
+    F3: Download Transaction Log (Large) (requires live AccuLoad device
+    with a large transaction log present).
+    """
     app = app_ftp
     _connect_or_skip(app, device_ip)
     save_path = str(tmp_path / "test_f3_transaction_log.txt")
     result = download_transaction_log(app, save_path)
+    _skip_if_no_info_to_pull(result, "transaction log")
     _assert_download_or_skip_timeout(result, save_path)
 
 
