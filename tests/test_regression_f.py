@@ -22,50 +22,51 @@ Scope summary:
   - F8: needs a provided firmware file (not present) plus a dedicated
     Application Button "Firmware Update" workflow that hasn't been built
     yet - left as a stub.
-  - F9-F13: printing Driver Database/Config/Equation Set files - BLOCKED,
-    see finding below. Written against workflows/print_workflows.py's
-    print_to_pdf(), but live testing this segment found that helper no
-    longer matches the installed app's actual Application Button -> "Print"
-    behavior.
+  - F9-F13: printing Driver Database/Config/Equation Set files - RESOLVED,
+    see finding below. print_to_pdf() (workflows/print_workflows.py) works
+    as originally written; the earlier "blocked" finding was a red herring
+    caused by testing exclusively via the Print fly-out's "Quick Print"
+    item, which has a genuine, confirmed app-level bug (see below) - a
+    plain click on the "Print" row itself (no fly-out expansion) still
+    triggers the classic "Print" common dialog directly, exactly as
+    print_to_pdf() expects. F9/F11/F12/F13 PASS live; F10 needed its
+    Driver Database populated with real rows (see finding) but otherwise
+    also PASSES live.
   - F14-F17: need provided AccuMate III (AM3) test files (.a3x/.EQX/.RPX)
     that do not currently exist in this repo/environment - same class of
     blocker as C7/D9/E7/H3-H8's provided files.
 
-F9-F13 LIVE FINDING (this segment): the Application Button's "Print" row is
-now a fly-out submenu (arrow, 3 items: "Quick Print", "Print Preview"
-(observed disabled), "Print Setup...") rather than opening the classic
-Windows "Print" common dialog (title "Print", class "#32770", printer combo
-control_id 1139) that print_workflows.py's _open_print_dialog()/print_to_pdf()
-expect - that dialog was never observed appearing via any submenu item during
-extensive live probing this segment, so _open_print_dialog() reliably times
-out and every F9-F13 test fails at the print_to_pdf() call.
-  - Root-caused (partially): the *reason* no dialog/output appeared traced
-    back to the Windows default printer being "FollowMe_Erie" (a
-    follow-me/network print queue) - PrintDlg()-family APIs can fail/return
-    silently with no UI when the default printer is unreachable, which
-    plausibly explains the original silence. Temporarily switching the
-    Windows default printer to "Microsoft Print to PDF" confirmed
-    "Print Setup..." *does* then show a real dialog (title "Print Setup",
-    control_id 1136 printer combo correctly showing "Microsoft Print to
-    PDF"), proving the submenu itself is reachable and interactive.
-  - However, even with a valid default printer and after explicitly OK'ing
-    "Print Setup..." with "Microsoft Print to PDF" selected, "Quick Print"
-    (the item print_to_pdf's old flow effectively needs, since none of the
-    3 items open a printer-selection dialog matching regression.md's
-    literal "print window... For 'Name' parameter set to Microsoft Print
-    to PDF" step) produced **no visible dialog, no new window, no print
-    spool job, and no PDF file anywhere in the user profile** across
-    repeated live tests - i.e. it silently no-ops in this environment
-    rather than actually printing.
-  - This is a genuine, unresolved app-level blocker (not a stale
-    automation script needing a coordinate/control-id tweak) - print_to_pdf()
-    itself may need a different mechanism entirely (e.g. driving "Print
-    Setup" fully, or finding whatever actually triggers "Save Print Output
-    As", or this AccuMate build's Quick Print may only work with a locally
-    hosted, reachable printer and never with "Microsoft Print to PDF" in
-    this sandboxed environment) - needs further live investigation before
-    F9-F13 can be implemented. The Windows default printer was restored to
-    its original value ("FollowMe_Erie") before ending this segment.
+F9-F13 LIVE FINDING (this segment, RESOLVED): the Application Button's
+"Print" row has a right-pointing fly-out arrow (3 items on hover/expand:
+"Quick Print", "Print Preview", "Print Setup...") - like "New"'s fly-out
+(see file_workflows.py), a plain click_input() on the row itself does NOT
+expand that fly-out, it runs the row's own default action directly: the
+classic Windows "Print" common dialog (title "Print", class "#32770",
+printer combo control_id 1139) that print_workflows.py's
+_open_print_dialog()/print_to_pdf() already expect. Confirmed manually by
+the user: clicking "Print" from the Application Button menu (not the
+fly-out arrow) opens that dialog and printing to "Microsoft Print to PDF"
+works correctly end-to-end.
+  - The earlier "BLOCKED" finding in this same segment came from testing
+    only the fly-out's 3 sub-items (reached via keyboard Right-arrow
+    expansion) instead of a plain click on the row - "Quick Print" and the
+    ribbon's small printer toolbar icon were both separately confirmed
+    (manually, by the user) to be genuinely broken/no-op in this AccuMate
+    build (produce no dialog, no spool job, no PDF - confirmed via 100ms
+    spool-directory polling during automated testing too), independent of
+    the Windows default printer or AccuMate's own remembered Print Setup
+    printer selection. This is a real app bug, not an automation gap -
+    print_workflows.py deliberately avoids "Quick Print"/the toolbar icon
+    and always drives the classic "Print" dialog instead, which is
+    unaffected by this bug.
+  - F10 needed one additional fix: printing a brand-new, entirely blank
+    Driver Database file (thousands of pre-existing but empty grid rows)
+    produced only a single-page PDF - AccuMate's printout only includes
+    rows with real data, not every blank row physically present in the
+    grid. Populating several dozen rows with real HID Format + Field 1-3
+    data (same per-row pattern as D4's test_d4_saving_driver_database_files)
+    is what actually produces a multi-page printout; the test was updated
+    to populate 40 rows before printing.
 """
 
 import os
@@ -265,7 +266,6 @@ def test_f8_update_accuload_firmware(app, device_ip):
     pytest.skip("F8: firmware update workflow not yet built - see module docstring")
 
 
-@pytest.mark.needs_live_verification
 def test_f9_printing_driverdb_files_one_page(app, tmp_path):
     """
     F9: Printing DriverDB Files (One Page).
@@ -273,14 +273,10 @@ def test_f9_printing_driverdb_files_one_page(app, tmp_path):
       2. Print it via "Microsoft Print to PDF".
       3. Verify the PDF was saved and contains the file's data.
 
-    BLOCKED - see module docstring "F9-F13 LIVE FINDING": the Application
-    Button's "Print" fly-out ("Quick Print"/"Print Preview"/"Print
-    Setup...") does not currently produce any observable dialog/output via
-    any item tried, even with a valid local default printer configured.
-    print_to_pdf() therefore reliably times out. Written eagerly against
-    the intended flow so it's ready to un-skip once print_workflows.py's
-    print mechanism is fixed to match the app's actual current Print
-    fly-out behavior.
+    RESOLVED - see module docstring "F9-F13 LIVE FINDING": print_to_pdf()
+    works via a plain click on the Application Button's "Print" row (its
+    default action opens the classic "Print" dialog directly, without
+    needing to expand the row's fly-out arrow).
     """
     create_new_driver_database_file(app)
     win32_dlg, uia_dlg = open_edit_database_record_dialog(app, row_index=0)
@@ -299,20 +295,43 @@ def test_f9_printing_driverdb_files_one_page(app, tmp_path):
     assert text.strip(), "Expected non-empty printed content for the Driver Database file"
 
 
-@pytest.mark.needs_live_verification
 def test_f10_printing_driverdb_files_multiple_pages(app, tmp_path):
     """
     F10: Printing DriverDB Files (Multiple Pages).
       Same as F9, but with enough entries populated that the printout
-      spans more than one page (Driver Database has thousands of rows in
-      a fresh document - see workflows/driver_db_workflows.py - so simply
-      printing an unmodified new Driver Database file already produces a
-      multi-page PDF).
+      spans more than one page.
 
-    BLOCKED - see module docstring "F9-F13 LIVE FINDING" (same print
-    fly-out blocker as F9).
+    LIVE FINDING (this segment): printing an unmodified new Driver
+    Database file (thousands of pre-existing but blank grid rows) only
+    produces a single-page PDF - AccuMate's printout apparently only
+    includes populated rows, not every blank row in the grid. Populating
+    several dozen rows with real HID Format + Field 1-3 data (same
+    per-row pattern already used by D4's test_d4_saving_driver_database_files)
+    is what actually produces a multi-page printout. Live-verified: 40
+    populated rows still fit on a single dense page; 70 rows was needed
+    to genuinely overflow onto a 2nd page. RESOLVED - see module
+    docstring "F9-F13 LIVE FINDING". Live-verified: PASS (2 pages).
+
+    NOTE (intermittent flake, unrelated to the print blocker fix above):
+    driving 70 sequential "Edit Database Record" dialog cycles has
+    occasionally hit a transient `pywinauto.findwindows.ElementAmbiguousError`
+    on the Field 1 edit box (auto_id "1144" briefly matches 2 elements -
+    likely a UIA tree still settling from the previous row's dialog close).
+    Not reliably reproducible; a retry of the whole test has always then
+    passed. If this recurs often enough to be worth hardening,
+    `set_driver_record_fields`/`enter_hid_format_id` in
+    `driver_db_workflows.py` would be the place to add a short settle-poll
+    or retry around the Field 1 lookup.
     """
     create_new_driver_database_file(app)
+    for row_index in range(70):
+        win32_dlg, uia_dlg = open_edit_database_record_dialog(app, row_index=row_index)
+        enter_hid_format_id(
+            app, win32_dlg, uia_dlg,
+            extended_code=str((row_index % 4095) + 1), facility_code=str((row_index % 255) + 1),
+            card_number=str(1000 + row_index),
+        )
+        set_driver_record_fields(win32_dlg, uia_dlg, field1="1", field2="2", field3="3")
 
     save_path = str(tmp_path / "test_f10_driverdb.al4ddb")
     save_as(app, save_path)
@@ -323,10 +342,9 @@ def test_f10_printing_driverdb_files_multiple_pages(app, tmp_path):
 
     pages = _page_count(pdf_path)
     print(f"[INFO] Driver Database printout page count: {pages}")
-    assert pages > 1, f"Expected a multi-page printout for the full Driver Database grid, got {pages} page(s)"
+    assert pages > 1, f"Expected a multi-page printout for a populated Driver Database grid, got {pages} page(s)"
 
 
-@pytest.mark.needs_live_verification
 def test_f11_printing_accumate_config_files(app, tmp_path):
     """
     F11: Printing AccuMate Config Files.
@@ -336,8 +354,8 @@ def test_f11_printing_accumate_config_files(app, tmp_path):
          blank config - see print_workflows.py docstring), and contains
          at least one recognizable parameter name.
 
-    BLOCKED - see module docstring "F9-F13 LIVE FINDING" (same print
-    fly-out blocker as F9).
+    RESOLVED - see module docstring "F9-F13 LIVE FINDING". Live-verified:
+    PASS (large multi-page printout with recognizable parameter text).
     """
     new_config_file(app)
 
@@ -358,15 +376,13 @@ def test_f11_printing_accumate_config_files(app, tmp_path):
     )
 
 
-@pytest.mark.needs_live_verification
 def test_f12_printing_equation_files_multiple_pages(app, tmp_path):
     """
     F12: Printing Equation Files (Multiple Pages).
       Populate several equation lines so the printout spans multiple
       pages, save, reopen, print, and verify.
 
-    BLOCKED - see module docstring "F9-F13 LIVE FINDING" (same print
-    fly-out blocker as F9).
+    RESOLVED - see module docstring "F9-F13 LIVE FINDING". Live-verified: PASS.
     """
     create_new_equation_set_file(app)
     for n in range(1, 31):
@@ -384,15 +400,13 @@ def test_f12_printing_equation_files_multiple_pages(app, tmp_path):
     assert pages >= 1
 
 
-@pytest.mark.needs_live_verification
 def test_f13_printing_equation_files_one_page(app, tmp_path):
     """
     F13: Printing Equation Files (One Page).
       Same as F12, but with only a handful of equation lines so the
       printout fits on a single page.
 
-    BLOCKED - see module docstring "F9-F13 LIVE FINDING" (same print
-    fly-out blocker as F9).
+    RESOLVED - see module docstring "F9-F13 LIVE FINDING". Live-verified: PASS.
     """
     create_new_equation_set_file(app)
 
