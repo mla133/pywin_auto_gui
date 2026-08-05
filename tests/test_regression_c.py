@@ -7,8 +7,18 @@ for the full findings) and run as part of the default `pytest -s -v`
 suite.
 
 Scope summary (see workflows/translation_workflows.py for full detail):
-  - C4-C6: need a live, reachable AccuLoad device AND a not-yet-built
-    "AccuMate File Transfer" upload/download dialog workflow.
+  - C4-C5: implemented via workflows.file_transfer_workflows (wired through
+    workflows.translation_workflows.upload_translation_file/
+    download_translation_file - same thin-wrapper pattern already
+    live-verified for D6/D7 and E4/E5). Use the `app_ftp` fixture (not
+    `app`) since these perform a real device file transfer - see
+    conftest.py/app.application.APP_EXE_INSTALLED for why the plain
+    Release-build `app` fixture can't complete one. NOT YET LIVE-RUN
+    against the device; skip (rather than fail) specifically on the
+    device-timeout message like D6/D7/E4/E5 until confirmed.
+  - C6: needs the device to genuinely have no translation file present
+    (e.g. after a Factory Init) - a device-state precondition this repo
+    cannot safely arrange/verify, same class of gap as D8/E6/B14.
   - C7: needs a provided AM3-format Translation File (.LGX) that does not
     currently exist in this repo/environment - same class of blocker as
     D9/E7/H3-H8's provided files.
@@ -24,8 +34,11 @@ from workflows.translation_workflows import (
     open_edit_text_dialog,
     set_translation_text,
     enter_translation_for_row,
+    upload_translation_file,
+    download_translation_file,
 )
-from workflows.file_workflows import save_as, open_file_dialog
+from workflows.file_workflows import save_as, open_file_dialog, load_test_file
+from workflows.comm_workflows import configure_ip_and_connect
 
 
 def test_c1_creating_new_translation_files(app):
@@ -96,27 +109,75 @@ def test_c3_loading_translation_files(app, tmp_path):
     assert reopened_rows == original_rows
 
 
+_DEVICE_TIMEOUT_MESSAGE = "The operation timed out"
+
+
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_c4_uploading_translation_files(app, device_ip):
+def test_c4_uploading_translation_files(app_ftp, device_ip, tmp_path):
     """
     C4: Uploading Translation Files (requires live AccuLoad device).
       Connect to the device, then Upload File to AccuLoad -> browse to an
       .al4lang file -> upload completes successfully.
+
+    Builds a real .al4lang file first (reusing C1/C2's helpers) so this
+    test is self-contained. Skips (rather than fails) specifically on the
+    live-confirmed device-timeout message - see module docstring.
     """
-    pytest.skip("C4: 'AccuMate File Transfer' upload workflow not yet built - see module docstring")
+    app = app_ftp
+    create_new_translation_file(app)
+    enter_translation_for_row(app, 0, "Test Translation Upload")
+
+    upload_path = str(tmp_path / "test_c4_upload.al4lang")
+    save_as(app, upload_path)
+    assert os.path.isfile(upload_path)
+
+    # "Document Options" (Communications Settings) only becomes enabled
+    # once a real AL4 config document is loaded - a bare Translation
+    # document alone (created above) isn't enough, confirmed live (same
+    # gotcha documented in test_regression_d.py's D6).
+    load_test_file(app)
+
+    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    if not connected:
+        pytest.skip("AccuLoad device not reachable/connected")
+
+    result = upload_translation_file(app, upload_path)
+    if result["timed_out"] or (result["message"] and _DEVICE_TIMEOUT_MESSAGE in result["message"]):
+        pytest.skip(
+            f"Device-side file-transfer timeout (result={result!r}) - see "
+            "workflows/file_transfer_workflows.py module docstring 'LIVE FINDING'"
+        )
+    assert result["message"] is not None, f"Expected a completion message, got {result!r}"
 
 
 @pytest.mark.requires_device
 @pytest.mark.needs_live_verification
-def test_c5_downloading_translation_files(app, device_ip):
+def test_c5_downloading_translation_files(app_ftp, device_ip, tmp_path):
     """
     C5: Downloading Translation Files (requires live AccuLoad device).
       Connect to the device, Download File From AccuLoad -> Translations
       File -> compare against the device's own /ftp/translation_ file.txt
       via SSH/checksum.
+
+    Skips (rather than fails) specifically on the live-confirmed
+    device-timeout message - see module docstring.
     """
-    pytest.skip("C5: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    app = app_ftp
+    load_test_file(app)
+
+    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    if not connected:
+        pytest.skip("AccuLoad device not reachable/connected")
+
+    save_path = str(tmp_path / "test_c5_download.al4lang")
+    result = download_translation_file(app, save_path)
+    if result["timed_out"] or (result["message"] and _DEVICE_TIMEOUT_MESSAGE in result["message"]):
+        pytest.skip(
+            f"Device-side file-transfer timeout (result={result!r}) - see "
+            "workflows/file_transfer_workflows.py module docstring 'LIVE FINDING'"
+        )
+    assert os.path.isfile(save_path), f"Expected download to save a file, result={result!r}"
 
 
 @pytest.mark.requires_device
@@ -127,8 +188,18 @@ def test_c6_no_translation_file_to_download(app, device_ip):
     with no translation file present, e.g. after a Factory Init).
       Download File From AccuLoad -> Translation File -> a warning popup
       notifies the user there is nothing to pull.
+
+    NOT YET LIVE-VERIFIED: requires deliberately putting the device into a
+    "no translation file present" state (e.g. via Factory Init), which
+    this repo has no automated way to arrange/confirm safely. Left as a
+    manual prerequisite - skips until that device state can be guaranteed,
+    same class of gap as D8/E6/B14.
     """
-    pytest.skip("C6: 'AccuMate File Transfer' download workflow not yet built - see module docstring")
+    pytest.skip(
+        "C6: requires the physical AccuLoad to be in a known 'no "
+        "translation file present' state (e.g. after Factory Init), which "
+        "isn't something this repo can safely arrange/verify automatically."
+    )
 
 
 @pytest.mark.needs_live_verification

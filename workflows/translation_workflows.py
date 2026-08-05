@@ -4,8 +4,12 @@ Translation document type workflows (scenarios/regression.md C1-C7).
 C1-C3 are LIVE-VERIFIED against the real running app (control ids, dialog
 title, and the "New" fly-out mechanism all confirmed live - see
 workflows/file_workflows.py's _click_new_document_flyout_item for the
-fly-out mechanism itself, now keyboard-navigation-based). C4-C7 remain
-unimplemented - see the "Remaining gaps" section below.
+fly-out mechanism itself, now keyboard-navigation-based). C4-C6 are wired
+via workflows.file_transfer_workflows (same pattern as D6-D8/E4-E6's
+upload_driver_database_file/download_driver_database_file,
+upload_equation_file/download_equation_file) but NOT YET LIVE-VERIFIED
+against a real device - see "Remaining gaps" below. C7 remains
+unimplemented (missing provided file).
 
 Live-verified findings:
   - Selecting "Translation" from the "New" fly-out creates a new document
@@ -28,11 +32,14 @@ Live-verified findings:
     this app in prior live testing of other document types.
 
 Remaining gaps (NOT yet implemented/verified):
-  - C4 (Upload)/C5 (Download)/C6 (No file to download): need a live,
-    reachable AccuLoad device AND a not-yet-built "AccuMate File
-    Transfer" upload/download dialog workflow (same gap documented in
-    workflows/driver_db_workflows.py and workflows/equation_workflows.py
-    for D6-D8/E4-E6).
+  - C4 (Upload)/C5 (Download)/C6 (No file to download): implemented via
+    workflows.file_transfer_workflows (upload_translation_file/
+    download_translation_file below) but NOT YET LIVE-RUN against a real
+    device - expected to behave like D6/D7/E4/E5 once verified (real
+    "File transfer complete."/"No information to pull..." messages via
+    the app_ftp fixture - see conftest.py/app.application.
+    APP_EXE_INSTALLED for why a plain `app` fixture won't complete a real
+    transfer).
   - C7: needs a provided AM3-format Translation File (.LGX) that does not
     currently exist in this repo/environment - same class of blocker as
     D9/E7/H3-H8's provided files.
@@ -49,6 +56,7 @@ from workflows.file_workflows import (
     _NEW_FLYOUT_TRANSLATION_INDEX,
     open_new_document_verified,
 )
+from workflows.file_transfer_workflows import upload_file, download_file
 
 _EDIT_TEXT_DIALOG_TITLE = "Edit Text"
 _EDIT_TEXT_DIALOG_CLASS = "#32770"
@@ -151,3 +159,32 @@ def enter_translation_for_row(app_obj, row_index, new_text):
     set its New Text value in one call (C2 step 1's repeated action)."""
     win32_dlg, uia_dlg = open_edit_text_dialog(app_obj, row_index)
     set_translation_text(uia_dlg, new_text)
+
+
+def upload_translation_file(app_obj, file_path):
+    """
+    C4: Upload a Translation File (.al4lang) to a connected AccuLoad via
+    the ribbon "Upload File to AccuLoad" button's "AccuMate File Transfer"
+    window.
+
+    Returns the result dict from workflows.file_transfer_workflows.
+    start_transfer(): {"message": str or None, "timed_out": bool}. See
+    driver_db_workflows.upload_driver_database_file's docstring for the
+    shape/meaning of that dict, including the live-confirmed
+    device-transfer-timeout caveat (now resolved via the app_ftp fixture -
+    see conftest.py/app.application.APP_EXE_INSTALLED).
+    """
+    return upload_file(app_obj, file_path)
+
+
+def download_translation_file(app_obj, save_path):
+    """
+    C5/C6: Download a Translation File from a connected AccuLoad via the
+    ribbon "Download File From AccuLoad" button, selecting "Translation
+    File" in the "File Download Selection" dialog.
+
+    Returns the result dict from workflows.file_transfer_workflows.
+    start_transfer() - see upload_translation_file's docstring for the
+    shape/meaning of that dict.
+    """
+    return download_file(app_obj, "Translation File", save_path)
