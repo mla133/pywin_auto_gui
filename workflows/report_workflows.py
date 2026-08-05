@@ -146,17 +146,32 @@ Remaining gaps (NOT yet implemented/verified):
     (`needs_live_verification`) until a real run against a live device
     exercises this path. B11/B12 additionally need provided AM3 (.RPX)/
     early-AM4 report files not present in this repo/environment.
-  - B27 (shrink page size with an existing item now out of range): the
-    Ticket #3644 bug above blocks placing an item via the dialog after any
-    resize, and reliably landing a dragged item beyond a shrunk page's new
-    bounds requires the canvas to actually be scrolled/displayed at that
-    size on screen, which was not achieved in this pass (drags landing
-    outside the currently-visible canvas viewport are rejected the same
-    way as a genuine out-of-bounds drop - see B25). Live-attempting this
-    produced no warning dialog, but that result is inconclusive (the item
-    likely never actually left the still-in-bounds visible viewport)
-    rather than a confirmed negative - treat B27 as unconfirmed, not
-    "no warning happens".
+
+B27 RESOLVED (was previously listed as a gap needing canvas-scrolling
+support - that assumption was wrong): no drag/scroll is needed at all.
+The scenario doesn't require moving an existing item past the visible
+viewport - it only requires the item to already occupy a line that's
+in-bounds for the CURRENT page size but out-of-bounds for a SMALLER
+Custom size set afterward. Placing the item via the normal Insert dialog
+BEFORE any resize (on the pristine default canvas) sidesteps the Ticket
+#3644 dialog-validation bug entirely (that bug only affects the dialog
+AFTER a resize has already happened). Live-verified: shrinking the page
+below the item's line pops an "AccuMate" warning reading "New page
+boundaries won't fit the current report items", and clicking OK on the
+"Report Options" dialog again afterward (rather than Cancel) re-validates
+and re-shows the identical warning in a loop rather than committing - so
+tests should Cancel out of "Report Options" once the warning is
+acknowledged, not re-OK it.
+  - Also discovered live during this fix: the Default page's real usable
+    line bound is considerably smaller than the "~60 lines" advertised by
+    the Report Options "Default" radio button's own label / B26's
+    docstring above - binary-searched live on a genuinely blank canvas:
+    line 35 is accepted (item placed cleanly), but line 40+ is rejected
+    by the Insert dialog's own validation with the same "would cause
+    overlap with an existing item" message used for the Ticket #3644 bug
+    (not an "exceed bounds" message as might be expected) - i.e. the
+    dialog's overlap-vs-bounds validation appears to conflate the two
+    failure modes even when nothing else is on the canvas.
 """
 
 import time
