@@ -25,6 +25,7 @@ Scope summary (see workflows/translation_workflows.py for full detail):
 """
 
 import os
+import time
 
 import pytest
 
@@ -202,11 +203,33 @@ def test_c6_no_translation_file_to_download(app, device_ip):
     )
 
 
-@pytest.mark.needs_live_verification
 def test_c7_loading_am3_translation_files(app):
     """
-    C7: Loading AM3 Translation Files (needs a provided .LGX test file,
-    not currently present in this repo/environment - same class of
-    blocker as D9/E7/H3-H8's provided files).
+    C7: Loading AM3 Translation Files.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/C7.LGX (an AccuMate III translation
+         file provided for this test).
+      3. Verify the file loads/converts into a real, readable AccuMate IV
+         Translation view (main window title reflects the loaded file;
+         translation grid is populated with real rows).
     """
-    pytest.skip("C7: requires a provided AM3 .LGX test file not present in this repo")
+    lgx_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "C7.LGX"))
+    if not os.path.isfile(lgx_path):
+        pytest.skip(f"C7: provided AM3 .LGX test file not found: {lgx_path}")
+
+    print(f"[STEP] Loading AM3 translation file: {lgx_path}")
+    open_file_dialog(app, lgx_path)
+
+    start = time.time()
+    title = ""
+    while time.time() - start < 25:
+        title = app.get_window().window_text()
+        if "C7" in title:
+            break
+        time.sleep(1)
+    assert "C7" in title, f"Main window title does not reflect the loaded .LGX file: {title!r}"
+
+    rows = get_translation_rows(app)
+    assert rows is not None and len(rows) >= 1, (
+        f"Expected populated translation rows after loading the AM3 file, got: {rows!r}"
+    )

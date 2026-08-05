@@ -263,11 +263,33 @@ def test_d8_no_driver_database_file_to_download(app, device_ip, tmp_path):
 
 
 
-@pytest.mark.needs_live_verification
 def test_d9_loading_am3_driver_database_files(app):
     """
-    D9: Loading AM3 Driver Database Files (needs a provided .3DB test
-    file, not currently present in this repo/environment - same class of
-    blocker as H3-H8's provided files).
+    D9: Loading AM3 Driver Database Files.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/D9.3DB (an AccuMate III driver
+         database file provided for this test).
+      3. Verify the file loads/converts into a real, readable AccuMate IV
+         Driver Database view (main window title reflects the loaded
+         file; grid is populated with real rows).
     """
-    pytest.skip("D9: requires a provided AM3 .3DB test file not present in this repo")
+    db_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "D9.3DB"))
+    if not os.path.isfile(db_path):
+        pytest.skip(f"D9: provided AM3 .3DB test file not found: {db_path}")
+
+    print(f"[STEP] Loading AM3 driver database file: {db_path}")
+    open_file_dialog(app, db_path)
+
+    start = time.time()
+    title = ""
+    while time.time() - start < 25:
+        title = app.get_window().window_text()
+        if "D9" in title:
+            break
+        time.sleep(1)
+    assert "D9" in title, f"Main window title does not reflect the loaded .3DB file: {title!r}"
+
+    rows = get_driver_database_rows(app)
+    assert rows is not None and len(rows) >= 1, (
+        f"Expected populated driver database rows after loading the AM3 file, got: {rows!r}"
+    )

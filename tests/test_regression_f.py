@@ -70,6 +70,7 @@ works correctly end-to-end.
 """
 
 import os
+import time
 
 import pytest
 from pypdf import PdfReader
@@ -77,24 +78,37 @@ from pypdf import PdfReader
 from workflows.file_workflows import new_config_file, save_as, open_file_dialog, load_test_file
 from workflows.print_workflows import print_to_pdf
 from workflows.comm_workflows import configure_ip_and_connect
+from workflows.report_workflows import get_report_items
 from workflows.driver_db_workflows import (
     create_new_driver_database_file,
     open_edit_database_record_dialog,
     enter_hid_format_id,
     set_driver_record_fields,
 )
-from workflows.equation_workflows import create_new_equation_set_file, insert_equation_line
+from workflows.equation_workflows import create_new_equation_set_file, insert_equation_line, get_equation_set_rows
 from workflows.log_workflows import (
     download_transaction_log,
     download_event_log,
     download_audit_trail_log,
     download_license_status_file,
 )
+from pages.main_page import MainPage
 
 _DEVICE_TIMEOUT_MESSAGE = "The operation timed out"
 _NO_INFO_MESSAGE = "No information to pull from the AccuLoad."
 
 _PDF_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "print_output"))
+
+
+def _wait_for_title_contains(app, substring, timeout=25):
+    start = time.time()
+    title = ""
+    while time.time() - start < timeout:
+        title = app.get_window().window_text()
+        if substring in title:
+            break
+        time.sleep(1)
+    return title
 
 
 def _pdf_path(name):
@@ -419,41 +433,150 @@ def test_f13_printing_equation_files_one_page(app, tmp_path):
     assert _page_count(pdf_path) >= 1
 
 
-@pytest.mark.needs_live_verification
 def test_f14_api_table_conversions_from_a3x_to_al4(app):
     """
-    F14: API Table Conversions From A3X to AL4 (needs a provided set of
-    AccuMate III .a3x files with various API Table configurations, not
-    currently present in this repo/environment).
+    F14: API Table Conversions From A3X to AL4.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/F14.A3X (an AccuMate III
+         configuration file provided for this test, with an API Table
+         value configured under Arm -> Meter -> Product -> Temperature/
+         Density).
+      3. Verify the file loads/converts and that the converted
+         Temperature/Density parameter view exposes a real, non-blank
+         "API Table" value (the specific expected mapped value isn't
+         asserted here since it depends on the exact API Table option
+         chosen when the provided file was created - see regression.md's
+         "API Tables.txt" mapping for a human cross-check).
     """
-    pytest.skip("F14: requires provided AM3 .a3x test files not present in this repo")
+    a3x_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "F14.A3X"))
+    if not os.path.isfile(a3x_path):
+        pytest.skip(f"F14: provided AM3 .a3x test file not found: {a3x_path}")
+
+    print(f"[STEP] Loading AM3 configuration file: {a3x_path}")
+    open_file_dialog(app, a3x_path)
+
+    title = _wait_for_title_contains(app, "F14")
+    assert "F14" in title, f"Main window title does not reflect the loaded .a3x file: {title!r}"
+
+    page = MainPage(app, request=None)
+    page.test_name = "test_f14_api_table_conversions_from_a3x_to_al4"
+
+    print("[STEP] Navigating to Arm -> Meter -> Product -> Temperature/Density")
+    page.select_tree_path(["Arm 1", "Meter 1", "Product 1", "Temperature/Density"])
+
+    api_table_value = page.get_value("API Table")
+    assert api_table_value, "Expected a non-blank 'API Table' value after converting the .a3x file"
+    print(f"[INFO] Converted 'API Table' value: {api_table_value!r}")
 
 
-@pytest.mark.needs_live_verification
 def test_f15_parameter_conversions_from_a3x_configuration_file(app):
     """
-    F15: Parameter Conversions from A3X - Configuration File (needs a
-    provided AccuMate III .a3x configuration file with specific parameter
-    values set, not currently present in this repo/environment).
+    F15: Parameter Conversions from A3X - Configuration File.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/F15.A3X (an AccuMate III
+         configuration file provided for this test, with System Status
+         Display = Yes under System -> General Purpose, and Inhibit Auto
+         Focus = Yes under System -> Communications).
+      3. Verify the file loads/converts with no errors, and that both
+         parameters carried over correctly.
     """
-    pytest.skip("F15: requires a provided AM3 .a3x configuration test file not present in this repo")
+    a3x_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "F15.A3X"))
+    if not os.path.isfile(a3x_path):
+        pytest.skip(f"F15: provided AM3 .a3x test file not found: {a3x_path}")
+
+    print(f"[STEP] Loading AM3 configuration file: {a3x_path}")
+    open_file_dialog(app, a3x_path)
+
+    title = _wait_for_title_contains(app, "F15")
+    assert "F15" in title, f"Main window title does not reflect the loaded .a3x file: {title!r}"
+
+    page = MainPage(app, request=None)
+    page.test_name = "test_f15_parameter_conversions_from_a3x_configuration_file"
+
+    print("[STEP] Navigating to System Directory -> General Purpose")
+    page.select_tree_path(["System Directory", "General Purpose"])
+    system_status_display = page.get_value("System Status Display")
+    assert system_status_display == "Yes", (
+        f"Expected 'System Status Display' to convert to 'Yes', got: {system_status_display!r}"
+    )
+
+    print("[STEP] Navigating to System Directory -> Communications")
+    page.select_tree_path(["System Directory", "Communications"])
+    inhibit_auto_focus = page.get_value("Inhibit Auto Focus")
+    assert inhibit_auto_focus == "Yes", (
+        f"Expected 'Inhibit Auto Focus' to convert to 'Yes', got: {inhibit_auto_focus!r}"
+    )
 
 
-@pytest.mark.needs_live_verification
 def test_f16_parameter_conversions_from_a3x_report_file(app):
     """
-    F16: Parameter Conversions from A3X - Report File (needs a provided
-    AccuMate III .RPX report file, not currently present in this
-    repo/environment).
+    F16: Parameter Conversions from A3X - Report File.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/F16.RPX (an AccuMate III report
+         file provided for this test, containing 2 Run/Program Data
+         Description items: "Inhibit Auto Focus" (System Configuration
+         register 734) and "System Status Display" (System Configuration
+         register 139)).
+      3. Verify both items are present on the converted Report canvas and
+         neither shows an "Invalid Register" placeholder.
     """
-    pytest.skip("F16: requires a provided AM3 .RPX test file not present in this repo")
+    rpx_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "F16.RPX"))
+    if not os.path.isfile(rpx_path):
+        pytest.skip(f"F16: provided AM3 .RPX test file not found: {rpx_path}")
+
+    print(f"[STEP] Loading AM3 report file: {rpx_path}")
+    open_file_dialog(app, rpx_path)
+
+    title = _wait_for_title_contains(app, "F16")
+    assert "F16" in title, f"Main window title does not reflect the loaded .RPX file: {title!r}"
+
+    items = get_report_items(app)
+    texts = [item["text"] for item in items]
+    print(f"[INFO] Report canvas items after conversion: {texts}")
+
+    assert any("Inhibit Auto Focus" in t for t in texts), (
+        f"Expected an 'Inhibit Auto Focus' item on the converted report canvas, got: {texts}"
+    )
+    assert any("System Status Display" in t for t in texts), (
+        f"Expected a 'System Status Display' item on the converted report canvas, got: {texts}"
+    )
+    assert not any("Invalid Register" in t for t in texts), (
+        f"Found an 'Invalid Register' item on the converted report canvas: {texts}"
+    )
 
 
-@pytest.mark.needs_live_verification
 def test_f17_parameter_conversions_from_a3x_equations_file(app):
     """
-    F17: Parameter Conversions from A3X - Equations File (needs a provided
-    AccuMate III .EQX equations file, not currently present in this
-    repo/environment).
+    F17: Parameter Conversions from A3X - Equations File.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/F17.EQX (an AccuMate III equations
+         file provided for this test, containing 2 USERBOOL registers:
+         one for System Configuration register 734 (Inhibit Auto Focus)
+         and one for System Configuration register 139 (System Status
+         Display)).
+      3. Verify both USERBOOL rows are present on the converted Equation
+         Set view and neither shows an "Invalid Register" placeholder.
     """
-    pytest.skip("F17: requires a provided AM3 .EQX test file not present in this repo")
+    eqx_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "F17.EQX"))
+    if not os.path.isfile(eqx_path):
+        pytest.skip(f"F17: provided AM3 .EQX test file not found: {eqx_path}")
+
+    print(f"[STEP] Loading AM3 equations file: {eqx_path}")
+    open_file_dialog(app, eqx_path)
+
+    title = _wait_for_title_contains(app, "F17")
+    assert "F17" in title, f"Main window title does not reflect the loaded .EQX file: {title!r}"
+
+    rows = get_equation_set_rows(app)
+    flattened = [" ".join(row) for row in rows]
+    print(f"[INFO] Equation rows after conversion: {flattened}")
+
+    assert any("734" in r or "Inhibit Auto Focus" in r for r in flattened), (
+        f"Expected a USERBOOL row referencing register 734/Inhibit Auto Focus, got: {flattened}"
+    )
+    assert any("139" in r or "System Status Display" in r for r in flattened), (
+        f"Expected a USERBOOL row referencing register 139/System Status Display, got: {flattened}"
+    )
+    assert not any("Invalid Register" in r for r in flattened), (
+        f"Found an 'Invalid Register' row in the converted equation set: {flattened}"
+    )

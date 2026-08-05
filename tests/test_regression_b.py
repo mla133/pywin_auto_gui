@@ -8,13 +8,15 @@ suite.
 
 Scope summary (see workflows/report_workflows.py for full detail):
   - B4-B10, B13-B14: wired to workflows/file_transfer_workflows.py +
-    report_workflows.upload_report_file/download_report_file. The extra
-    "Select Report" dialog these steps describe has NOT been live-probed
-    yet (see report_workflows.py's module docstring) - treat as
-    UNCONFIRMED until run against a real device. All skip gracefully on
-    the same live-confirmed device-transfer-timeout limitation documented
-    in test_regression_d.py's D6/D7. B11/B12 additionally need provided
-    AM3 (.RPX)/early-AM4 report files not present in this repo/environment.
+    report_workflows.upload_report_file/download_report_file. LIVE-VERIFIED
+    passing (real "File transfer complete." device round-trips) using the
+    `app_ftp` fixture - see the FTP transfer investigation in this
+    project's session history. B14 remains skipped on an unrelated,
+    un-arrangeable device-state precondition.
+  - B11/B12: LIVE-VERIFIED. Load `configs/B11.RPX` (AM3 report file) /
+    `configs/B12.al4rep` (early-AM4 report file) via `open_file_dialog`,
+    poll the main window title for the "B11"/"B12" substring, then assert
+    the converted report canvas is queryable via `get_report_items`.
   - B27 (RESOLVED): no canvas-scrolling/dragging needed after all - the
     "out of bounds after a resize" scenario doesn't require moving an
     existing item beyond the visible viewport, just placing it (via the
@@ -32,6 +34,7 @@ Scope summary (see workflows/report_workflows.py for full detail):
 """
 
 import os
+import time
 
 import pytest
 
@@ -762,24 +765,64 @@ def test_b10_downloading_report_files_prove_report(app_ftp, device_ip, tmp_path)
     assert os.path.isfile(save_path), f"Expected download to save a file, result={result!r}"
 
 
-@pytest.mark.needs_live_verification
 def test_b11_loading_am3_report_files(app):
     """
-    B11: Loading AM3 Report Files (needs a provided .RPX test file, not
-    currently present in this repo/environment - same class of blocker as
-    H3-H8's provided files).
+    B11: Loading AM3 Report Files.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/B11.RPX (an AccuMate III report
+         file provided for this test).
+      3. Verify the file loads/converts into a real, readable AccuMate IV
+         Report view (main window title reflects the loaded file; report
+         canvas is queryable without error).
     """
-    pytest.skip("B11: requires a provided AM3 .RPX test file not present in this repo")
+    rpx_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "B11.RPX"))
+    if not os.path.isfile(rpx_path):
+        pytest.skip(f"B11: provided AM3 .RPX test file not found: {rpx_path}")
+
+    print(f"[STEP] Loading AM3 report file: {rpx_path}")
+    open_file_dialog(app, rpx_path)
+
+    start = time.time()
+    title = ""
+    while time.time() - start < 25:
+        title = app.get_window().window_text()
+        if "B11" in title:
+            break
+        time.sleep(1)
+    assert "B11" in title, f"Main window title does not reflect the loaded .RPX file: {title!r}"
+
+    items = get_report_items(app)
+    assert items is not None, "Expected the Report canvas to be readable after loading the AM3 file"
 
 
-@pytest.mark.needs_live_verification
 def test_b12_loading_early_am4_report_files(app):
     """
-    B12: Loading Early AM4 Report Files (needs a provided early-AM4-format
-    report file with <none> Alarm entries, not currently present in this
-    repo/environment).
+    B12: Loading Early AM4 Report Files.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/B12.al4rep (an early-AM4-format
+         report file with <none> Alarm entries, provided for this test).
+      3. Verify the file loads into a real, readable AccuMate IV Report
+         view (main window title reflects the loaded file; report canvas
+         is queryable without error).
     """
-    pytest.skip("B12: requires a provided early-AM4-format report file not present in this repo")
+    report_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "B12.al4rep"))
+    if not os.path.isfile(report_path):
+        pytest.skip(f"B12: provided early-AM4-format report file not found: {report_path}")
+
+    print(f"[STEP] Loading early-AM4 report file: {report_path}")
+    open_file_dialog(app, report_path)
+
+    start = time.time()
+    title = ""
+    while time.time() - start < 25:
+        title = app.get_window().window_text()
+        if "B12" in title:
+            break
+        time.sleep(1)
+    assert "B12" in title, f"Main window title does not reflect the loaded report file: {title!r}"
+
+    items = get_report_items(app)
+    assert items is not None, "Expected the Report canvas to be readable after loading the early-AM4 file"
 
 
 @pytest.mark.requires_device

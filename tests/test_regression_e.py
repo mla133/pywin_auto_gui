@@ -17,6 +17,7 @@ Scope summary (see workflows/equation_workflows.py for full detail):
 """
 
 import os
+import time
 
 import pytest
 
@@ -189,14 +190,36 @@ def test_e6_no_equation_file_to_download(app, device_ip):
 
 
 
-@pytest.mark.needs_live_verification
 def test_e7_loading_am3_equation_files(app):
     """
-    E7: Loading AM3 Equation Files (needs a provided .EQX test file, not
-    currently present in this repo/environment - same class of blocker as
-    H3-H8's provided files).
+    E7: Loading AM3 Equation Files.
+      1. Open the "Open" file dialog.
+      2. Navigate to and open configs/E7.EQX (an AccuMate III equations
+         file provided for this test).
+      3. Verify the file loads/converts into a real, readable AccuMate IV
+         Equation Set view (main window title reflects the loaded file;
+         equation grid is populated with real rows).
     """
-    pytest.skip("E7: requires a provided AM3 .EQX test file not present in this repo")
+    eqx_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "configs", "E7.EQX"))
+    if not os.path.isfile(eqx_path):
+        pytest.skip(f"E7: provided AM3 .EQX test file not found: {eqx_path}")
+
+    print(f"[STEP] Loading AM3 equations file: {eqx_path}")
+    open_file_dialog(app, eqx_path)
+
+    start = time.time()
+    title = ""
+    while time.time() - start < 25:
+        title = app.get_window().window_text()
+        if "E7" in title:
+            break
+        time.sleep(1)
+    assert "E7" in title, f"Main window title does not reflect the loaded .EQX file: {title!r}"
+
+    rows = get_equation_set_rows(app)
+    assert rows is not None and len(rows) >= 1, (
+        f"Expected populated equation rows after loading the AM3 file, got: {rows!r}"
+    )
 
 
 @pytest.mark.requires_device
