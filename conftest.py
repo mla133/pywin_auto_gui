@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from app.application import AccuMateApp, APP_EXE_INSTALLED
 from workflows.accuload_web import AccuLoadWebSession
+from reporting.pdf_report import TestResult, build_pdf_report
 
 # Fallback AccuMate config used when --accumate-config-file isn't passed. This
 # is the app's own DefaultAL4.dat, installed alongside the executable (also
@@ -59,6 +60,19 @@ def pytest_addoption(parser):
             "passed."
         ),
     )
+    parser.addoption(
+        "--pdf-report",
+        action="store",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Opt-in: path to write a single PDF regression report summarizing this run "
+            "(pass/fail/skip counts + a full per-test breakdown with docstring, markers, "
+            "duration, failure text, and any screenshots/<test_name>/ captured during the "
+            "test). Not generated unless this flag is passed. See reporting/pdf_report.py "
+            "and docs/running-tests.md."
+        ),
+    )
 
 
 def pytest_configure(config):
@@ -81,6 +95,94 @@ def pytest_configure(config):
         "as opposed to AccuMate's desktop app - needs both a reachable device and the "
         "internal tools repo checked out (see ACCULOAD_TOOLS_REPO).",
     )
+    # Collector for --pdf-report: populated by pytest_runtest_makereport
+    # below, consumed by pytest_sessionfinish at the very end of the run.
+    config._pdf_report_results = []
+    config._pdf_report_run_started = datetime.now()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """
+    Collects one TestResult per test for --pdf-report, using only the
+    report phase that represents the test's real outcome: the "call"
+    phase report for a test that actually ran, or a "setup"/"teardown"
+    phase report instead if *that* phase itself failed/skipped (e.g. a
+    fixture-level skip.skip()/failure never reaches the call phase at
+    all) - this mirrors how pytest's own terminal summary decides a
+    test's final status, avoiding double-counting the same test 2-3 times
+    (setup/call/teardown all produce a report each).
+    """
+    outcome = yield
+    report = outcome.get_result()
+
+    config = item.config
+    if not config.getoption("--pdf-report"):
+        return
+
+    is_real_outcome = report.when == "call" or (
+        report.when in ("setup", "teardown") and report.outcome != "passed"
+    )
+    if not is_real_outcome:
+        return
+
+    if report.outcome == "passed":
+        result_outcome = "passed"
+    elif report.outcome == "skipped":
+        result_outcome = "skipped"
+    elif report.when == "call":
+        result_outcome = "failed"
+    else:
+        # A setup/teardown failure (as opposed to a plain call failure)
+        # is reported by pytest itself as an "error", not a "failure".
+        result_outcome = "error"
+
+    markers = [marker.name for marker in item.iter_markers()]
+    docstring = (item.function.__doc__ or "").strip() if hasattr(item, "function") else ""
+    longrepr = str(report.longrepr) if report.longrepr else ""
+
+    test_name = item.name
+    screenshot_dir = os.path.join("screenshots", test_name)
+
+    existing = next((r for r in config._pdf_report_results if r.nodeid == item.nodeid), None)
+    if existing is not None:
+        # A later phase (e.g. teardown error after a passing call) should
+        # override an earlier recorded outcome rather than add a
+        # duplicate row.
+        existing.outcome = result_outcome
+        existing.duration += report.duration
+        if longrepr:
+            existing.longrepr = longrepr
+    else:
+        config._pdf_report_results.append(TestResult(
+            nodeid=item.nodeid,
+            name=test_name,
+            outcome=result_outcome,
+            duration=report.duration,
+            docstring=docstring,
+            markers=markers,
+            longrepr=longrepr,
+            screenshot_dir=screenshot_dir,
+        ))
+
+
+def pytest_sessionfinish(session, exitstatus):
+    pdf_report_path = session.config.getoption("--pdf-report")
+    if not pdf_report_path:
+        return
+
+    results = session.config._pdf_report_results
+    if not results:
+        print("[WARN] --pdf-report was passed but no test results were collected - skipping PDF generation.")
+        return
+
+    output_path = build_pdf_report(
+        results,
+        pdf_report_path,
+        run_started=session.config._pdf_report_run_started,
+        run_finished=datetime.now(),
+    )
+    print(f"\n[INFO] PDF regression report written to: {output_path}")
 
 
 @pytest.fixture
