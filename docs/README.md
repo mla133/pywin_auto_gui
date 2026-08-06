@@ -20,6 +20,9 @@ them.
   marked, manual, special-case, or out of scope, and why.
 - [`running-tests.md`](running-tests.md) — marker/fixture/CLI cheat sheet
   for actually running the suite.
+- [`writing-aliv-bugfix-cases.md`](writing-aliv-bugfix-cases.md) — how to
+  author a one-off `scenarios/ALIV-<ticket>.md` bugfix regression case and
+  run it via `test_case_runner.py`, separate from the curated A-H suite.
 
 `mn06136.pdf` in this folder is the AccuLoad device manual (reference
 material, not authored documentation for this repo).

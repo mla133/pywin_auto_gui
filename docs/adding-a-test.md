@@ -20,14 +20,18 @@ alongside it).
 1. **Find the scenario's exact text** in `scenarios/regression.md` (search
    for its `h4. <ID>: <title>` heading) — the literal step text and
    "Expected Result" are your source of truth for what to assert.
+
 2. **Check for an existing stub.** Most scenario IDs already have a
    `pytest.skip(...)` placeholder in the matching
    `tests/test_regression_<letter>.py` file — rewrite it in place rather
    than adding a new function.
+
 3. **Reuse an existing workflow** if the document type/dialog is already
    covered (see [`adding-a-workflow.md`](adding-a-workflow.md) step 1) —
    don't re-derive dialog mechanics that already exist.
+
 4. **Decide what markers apply**:
+   
    - `@pytest.mark.requires_device` — needs a live, reachable AccuLoad.
    - `@pytest.mark.disruptive` — mutates persistent live-device state
      (e.g. resets IP/netmask) in a way that could break a *later* test in
@@ -47,15 +51,18 @@ alongside it).
      safe way to arrange or verify (see B14/C6/D8/E6). Don't invent a
      device-state assumption to force a pass — mark it `special_case` and
      document exactly what precondition a human would need to arrange.
+
 5. **Write the test body**, then **run it live** (`pytest -s -v
    tests/test_regression_<letter>.py::test_<id>_<slug> -m ""` — the `-m
    ""` override is needed if it's still marked
    `needs_live_verification`/`manual`/etc., since those are excluded from
    default `addopts`).
+
 6. **Watch for stray `AccuMate.exe` processes** between debug iterations
    (`Get-Process AccuMate`) — a leftover process from a prior failed run
    is the single most common cause of a confusing "this should work but
    times out" failure.
+
 7. Once it passes reliably, **remove `needs_live_verification`**, update
    the docstring from speculative/TODO language to a statement of
    confirmed behavior (cite the exact dialog text, control id, or
@@ -65,6 +72,7 @@ alongside it).
    ```bash
    pytest -s -v tests/test_regression_<letter>.py
    ```
+
 8. Update the module's docstring "Scope summary" section if one exists —
    these files intentionally keep a running summary of what's automated,
    what's blocked, and why, at the top of the file.
@@ -92,6 +100,10 @@ pattern set with genuinely bounded phrasings (fixed literal text, or a
 capture group constrained to something that can't swallow an unrelated
 clause) — see `test_case_runner.py`'s module docstring for two real false
 positives this caused and how they were fixed.
+
+For the full guide (document format, verifiers, clause-level auto-check
+assist, and a step-by-step authoring checklist), see
+[`writing-aliv-bugfix-cases.md`](writing-aliv-bugfix-cases.md).
 
 ## Ad-hoc scenario exploration (no test file at all)
 
