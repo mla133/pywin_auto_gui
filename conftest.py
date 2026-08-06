@@ -95,10 +95,35 @@ def pytest_configure(config):
         "as opposed to AccuMate's desktop app - needs both a reachable device and the "
         "internal tools repo checked out (see ACCULOAD_TOOLS_REPO).",
     )
+    config.addinivalue_line(
+        "markers",
+        "requires_ftp: auto-applied (see pytest_collection_modifyitems below) to any test "
+        "that requests the `app_ftp` fixture - i.e. anything that performs a real FTP file "
+        "upload/download to/from the AccuLoad device. Not excluded by default addopts (FTP "
+        "normally works fine), but useful to exclude explicitly with `-m \"not requires_ftp\"` "
+        "for a run where FTP access is known to be unavailable (e.g. testing over a VPN that "
+        "blocks the FTP data channel).",
+    )
     # Collector for --pdf-report: populated by pytest_runtest_makereport
     # below, consumed by pytest_sessionfinish at the very end of the run.
     config._pdf_report_results = []
     config._pdf_report_run_started = datetime.now()
+
+
+def pytest_collection_modifyitems(config, items):
+    """
+    Auto-applies the `requires_ftp` marker to any collected test that
+    requests the `app_ftp` fixture (directly or via another fixture that
+    itself depends on it), so a whole run can exclude real FTP-dependent
+    tests with `-m "not requires_ftp"` without having to hand-annotate
+    every such test - useful when testing over a VPN/network path known
+    to block the FTP data channel (see conftest.py's app_ftp fixture
+    docstring for the underlying FTP-vs-firewall finding this marker is
+    protecting against).
+    """
+    for item in items:
+        if "app_ftp" in item.fixturenames:
+            item.add_marker(pytest.mark.requires_ftp)
 
 
 @pytest.hookimpl(hookwrapper=True)

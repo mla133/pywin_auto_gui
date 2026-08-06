@@ -6,7 +6,7 @@ from workflows.comm_workflows import configure_ip_and_connect
 from workflows.security_workflows import enter_passcode
 from pages.main_page import MainPage
 
-DEVICE_CONNECT_TIMEOUT = 10
+DEVICE_CONNECT_TIMEOUT = 45  # bumped from 10s: remote/VPN sessions add connect latency
 
 
 @pytest.mark.requires_device

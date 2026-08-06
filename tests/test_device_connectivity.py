@@ -3,7 +3,7 @@ import pytest
 from workflows.file_workflows import load_config_file
 from workflows.comm_workflows import configure_ip_and_connect
 
-DEVICE_CONNECT_TIMEOUT = 15
+DEVICE_CONNECT_TIMEOUT = 45  # bumped from 15s: remote/VPN sessions add connect latency
 
 
 @pytest.mark.requires_device

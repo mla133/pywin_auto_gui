@@ -236,7 +236,7 @@ def dismiss_dialog(dlg, prefer_text=("OK",)):
     raise RuntimeError(f"Could not find a button to dismiss dialog {dlg.window_text()!r}")
 
 
-def configure_ip_and_connect(app_obj, ip_address, timeout=15, arm_addresses=None):
+def configure_ip_and_connect(app_obj, ip_address, timeout=45, arm_addresses=None):
     """
     Configure AccuMate's device IP address and attempt a live connection:
 
