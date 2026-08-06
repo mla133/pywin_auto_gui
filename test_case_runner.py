@@ -1,11 +1,11 @@
 """
 Hybrid runner for formal, wiki-markup-style manual test case documents (the
-kind exported from Jira/Confluence for a specific ticket, e.g.
+kind exported from Assembla for a specific ticket, e.g.
 scenarios/ALIV-3929.md) - as opposed to scenario_runner.py's simpler,
 purpose-written Markdown scenario format.
 
 These documents look nothing like scenario_runner's grammar:
-  - Confluence wiki markup headers ("h3.", "h4.") instead of "#"/"##".
+  - Assembla wiki markup headers ("h3.", "h4.") instead of "#"/"##".
   - Numbered steps that bundle several actions *and* a verification into
     one compound sentence (e.g. "Click the 'Go Offline' ribbon button.
     Confirm status is Offline. Click 'Retry Comm' to reconnect. Attempt to
@@ -42,7 +42,7 @@ Usage:
     python test_case_runner.py scenarios/ALIV-3929.md --report results/ALIV-3929-report.md
 
 Bugfix regression convention:
-    Any "scenarios/ALIV-<number>.md" file (naming convention: the Jira
+    Any "scenarios/ALIV-<number>.md" file (naming convention: the Assembla
     ticket ID for the bug it documents) is treated as a one-off, snap-in
     bugfix regression case - written once when a bug is fixed/verified, then
     available to be re-run standalone at any time, or as part of a full
@@ -151,7 +151,7 @@ def _clean_wiki_text(text):
 
 def parse_test_case_document(path):
     """
-    Parse a Confluence/Jira-style wiki-markup manual test case document into
+    Parse an Assembla-style wiki-markup manual test case document into
     an ordered list of TestSection objects, each holding its TestStep
     objects (step text + optional expected_result).
 
