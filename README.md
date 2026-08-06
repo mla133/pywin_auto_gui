@@ -7,6 +7,11 @@ There is no mocking layer here — every test drives the real application
 binary. This README documents the API as it stands today so a new
 contributor can start writing tests (or ad-hoc automation scripts) quickly.
 
+For deeper contributor documentation — architecture rationale, a
+step-by-step guide to adding a new workflow/test, the full
+`scenarios/regression.md` coverage matrix, and a marker/fixture/CLI cheat
+sheet — see [`docs/`](docs/README.md).
+
 ---
 
 # 🚀 Features
