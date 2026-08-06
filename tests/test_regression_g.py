@@ -480,11 +480,11 @@ def test_g1_new_config_after_install():
             pass
 
 
-@pytest.mark.needs_live_verification
+@pytest.mark.manual
 def test_g1_block_uninstall_while_app_running():
     """
     regression.md G1 step 5: uninstalling while AccuMate is running should
-    show a popup and be blocked.
+    show a popup and be blocked. MANUAL TEST.
 
     NOT automatable with confidence from this repo alone: this installer's
     [Code] section only wires its "already running" check into
@@ -495,14 +495,14 @@ def test_g1_block_uninstall_while_app_running():
     whether AccuMate.exe itself registers Inno's AppMutex
     ("AccuMateIVMutex", set via [Setup] AppMutex=) - that's implemented (or
     not) in the separate C++/MFC AccuMate source, out of scope for this
-    Python repo to inspect or assume. Needs a live human check (or access to
-    the AccuMate source) before this can be safely automated one way or the
-    other.
+    Python repo to inspect or assume. Must be performed manually by a human
+    tester (or verified against the AccuMate source) before this can be
+    safely automated one way or the other.
     """
     pytest.skip(
-        "Cannot confirm from this repo whether AccuMate.exe registers "
-        "Inno's AppMutex - needs a live check of actual uninstall-while-"
-        "running behavior before automating (see docstring)"
+        "G1: MANUAL TEST - cannot confirm from this repo whether "
+        "AccuMate.exe registers Inno's AppMutex; perform this step "
+        "manually (see docstring)"
     )
 
 
@@ -511,36 +511,37 @@ def test_g1_block_uninstall_while_app_running():
 # G5: Install AccuMate as Admin for the Current User
 # ---------------------------------------------------------------------------
 
-@pytest.mark.needs_live_verification
+@pytest.mark.manual
 def test_g4_install_as_admin_all_users():
     """
     regression.md G4: run the installer elevated (as Administrator) and
-    choose "Install for All Users". This session's shell is confirmed
-    non-admin (checked via
+    choose "Install for All Users". MANUAL TEST. This session's shell is
+    confirmed non-admin (checked via
     `([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]
     ::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)`
     -> False) - the elevation prompt (UAC), the Tasks page (desktop icon,
     only shown/enabled for admin per CheckTask), and the "main\\all" vs
     "main\\current" component radio choice have never been driven live.
-    Needs an elevated pytest/PowerShell session to probe and implement.
+    Must be performed manually by a human tester in an elevated
+    (Administrator) session.
     """
     pytest.skip(
-        "requires an elevated (Administrator) session - current session "
-        "confirmed non-admin; not yet live-probed"
+        "G4: MANUAL TEST - requires an elevated (Administrator) session; "
+        "current session confirmed non-admin - perform this step manually"
     )
 
 
-@pytest.mark.needs_live_verification
+@pytest.mark.manual
 def test_g5_install_as_admin_current_user():
     """
     regression.md G5: same as G4 but choosing "Install for Current User"
     while still running elevated (as Administrator) - per the .iss script,
     an admin user CAN still choose the current-user component even though
     they're elevated (SetCurrentUserOnlyComponents only forces this for a
-    genuinely non-admin user). Not yet live-verified - see
+    genuinely non-admin user). MANUAL TEST - see
     test_g4_install_as_admin_all_users' docstring for why.
     """
     pytest.skip(
-        "requires an elevated (Administrator) session - current session "
-        "confirmed non-admin; not yet live-probed"
+        "G5: MANUAL TEST - requires an elevated (Administrator) session; "
+        "current session confirmed non-admin - perform this step manually"
     )

@@ -182,24 +182,27 @@ def test_c5_downloading_translation_files(app_ftp, device_ip, tmp_path):
 
 
 @pytest.mark.requires_device
-@pytest.mark.needs_live_verification
+@pytest.mark.special_case
 def test_c6_no_translation_file_to_download(app, device_ip):
     """
-    C6: No Translation File To Download (requires live AccuLoad device
-    with no translation file present, e.g. after a Factory Init).
-      Download File From AccuLoad -> Translation File -> a warning popup
-      notifies the user there is nothing to pull.
+    C6: No Translation File To Download - SPECIAL CASE, not part of the
+    standard regression pass.
 
-    NOT YET LIVE-VERIFIED: requires deliberately putting the device into a
-    "no translation file present" state (e.g. via Factory Init), which
-    this repo has no automated way to arrange/confirm safely. Left as a
-    manual prerequisite - skips until that device state can be guaranteed,
-    same class of gap as D8/E6/B14.
+    Requires live AccuLoad device with no translation file present, e.g.
+    after a Factory Init. Download File From AccuLoad -> Translation File
+    -> a warning popup notifies the user there is nothing to pull.
+
+    Requires deliberately putting the device into a "no translation file
+    present" state (e.g. via Factory Init), which this repo has no
+    automated way to arrange/confirm safely. Documented as a special case
+    rather than run as part of the standard automated regression suite,
+    same class of gap as B14/D8/E6.
     """
     pytest.skip(
-        "C6: requires the physical AccuLoad to be in a known 'no "
-        "translation file present' state (e.g. after Factory Init), which "
-        "isn't something this repo can safely arrange/verify automatically."
+        "C6: SPECIAL CASE - requires the physical AccuLoad to be in a "
+        "known 'no translation file present' state (e.g. after Factory "
+        "Init), which isn't something this repo can safely arrange/verify "
+        "automatically; not part of the standard regression pass."
     )
 
 

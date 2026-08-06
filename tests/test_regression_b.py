@@ -886,20 +886,21 @@ def test_b13_upload_download_multiple_times(app_ftp, device_ip, tmp_path):
 
 
 @pytest.mark.requires_device
-@pytest.mark.needs_live_verification
+@pytest.mark.special_case
 def test_b14_no_report_to_download(app, device_ip, tmp_path):
     """
-    B14: No Report To Download (requires live AccuLoad device with all
-    *.CFG files removed from /media/data/database).
+    B14: No Report To Download - SPECIAL CASE, not part of the standard
+    regression pass.
 
-    NOTE: scaled-back scope, same class of simplification as D8/E6 - this
-    repo cannot safely arrange/verify the required device-side precondition
-    (no report configs present on the AccuLoad) for the full documented
-    sweep across all 4 report-slot types, so this remains a documented,
-    environment-state-blocked skip rather than iterating report types
-    against an assumed-empty device.
+    Requires live AccuLoad device with all *.CFG files removed from
+    /media/data/database. This repo cannot safely arrange/verify the
+    required device-side precondition (no report configs present on the
+    AccuLoad), so this is documented as a special case rather than run as
+    part of the standard automated regression suite. Same class of
+    simplification as C6/D8/E6.
     """
     pytest.skip(
-        "B14 requires a device with no report config files present - a "
-        "device-side state this repo cannot safely arrange or verify"
+        "B14: SPECIAL CASE - requires a device with no report config "
+        "files present, a device-side state this repo cannot safely "
+        "arrange or verify; not part of the standard regression pass"
     )

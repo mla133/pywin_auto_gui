@@ -243,14 +243,21 @@ def test_f5_download_audit_trail_log(app_ftp, device_ip, tmp_path):
     _assert_download_or_skip_timeout(result, save_path)
 
 
-@pytest.mark.requires_device
-@pytest.mark.needs_live_verification
+@pytest.mark.manual
 def test_f6_upload_download_license_status_file(app, device_ip):
-    """F6: Upload/Download License Status File (requires live AccuLoad device)."""
+    """
+    F6: Upload/Download License Status File - MANUAL.
+
+    Requires a real License Status file to upload, which has not been
+    supplied to this repo/environment (per explicit user instruction, no
+    firmware/License Status file is available yet). Must be performed
+    manually by a human tester against a live AccuLoad device until such a
+    file is provided.
+    """
     pytest.skip(
-        "F6: requires a provided License Status file to upload, which "
-        "doesn't exist in this repo/environment - see module docstring "
-        "(same class of blocker as C7/D9/E7/H3-H8's provided files)"
+        "F6: MANUAL TEST - requires a real License Status file to upload "
+        "(not supplied to this repo); perform this step manually against "
+        "a live AccuLoad device"
     )
 
 
@@ -273,11 +280,21 @@ def test_f7_no_license_status_to_download(app_ftp, device_ip, tmp_path):
     _assert_download_or_skip_timeout(result, save_path)
 
 
-@pytest.mark.requires_device
-@pytest.mark.needs_live_verification
+@pytest.mark.manual
 def test_f8_update_accuload_firmware(app, device_ip):
-    """F8: Update AccuLoad Firmware (requires live AccuLoad device + firmware file)."""
-    pytest.skip("F8: firmware update workflow not yet built - see module docstring")
+    """
+    F8: Update AccuLoad Firmware - MANUAL.
+
+    Requires a real firmware file (not supplied) plus a dedicated
+    Application Button "Firmware Update" workflow that hasn't been built
+    yet. Must be performed manually by a human tester against a live
+    AccuLoad device.
+    """
+    pytest.skip(
+        "F8: MANUAL TEST - requires a real firmware file and a "
+        "not-yet-built 'Firmware Update' workflow; perform this step "
+        "manually against a live AccuLoad device"
+    )
 
 
 def test_f9_printing_driverdb_files_one_page(app, tmp_path):

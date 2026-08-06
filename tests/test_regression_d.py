@@ -242,23 +242,28 @@ def test_d7_downloading_driver_database_files(app_ftp, device_ip, tmp_path):
 
 
 @pytest.mark.requires_device
-@pytest.mark.needs_live_verification
+@pytest.mark.special_case
 def test_d8_no_driver_database_file_to_download(app, device_ip, tmp_path):
     """
-    D8: No Driver Database File To Download (requires live AccuLoad
-    device with no driver.txt present, e.g. after a Factory Init).
-      Download File From AccuLoad -> Driver Database File -> a warning
-      popup notifies the user there is nothing to pull.
+    D8: No Driver Database File To Download - SPECIAL CASE, not part of
+    the standard regression pass.
 
-    NOT YET LIVE-VERIFIED: requires deliberately putting the device into a
-    "no driver database present" state (e.g. via Factory Init), which this
-    repo has no automated way to arrange/confirm safely. Left as a manual
-    prerequisite - skips until that device state can be guaranteed.
+    Requires live AccuLoad device with no driver.txt present, e.g. after a
+    Factory Init. Download File From AccuLoad -> Driver Database File ->
+    a warning popup notifies the user there is nothing to pull.
+
+    Requires deliberately putting the device into a "no driver database
+    present" state (e.g. via Factory Init), which this repo has no
+    automated way to arrange/confirm safely. Documented as a special case
+    rather than run as part of the standard automated regression suite,
+    same class of gap as B14/C6/E6.
     """
     pytest.skip(
-        "D8: requires the physical AccuLoad to be in a known 'no driver "
-        "database file present' state (e.g. after Factory Init), which "
-        "isn't something this repo can safely arrange/verify automatically."
+        "D8: SPECIAL CASE - requires the physical AccuLoad to be in a "
+        "known 'no driver database file present' state (e.g. after "
+        "Factory Init), which isn't something this repo can safely "
+        "arrange/verify automatically; not part of the standard "
+        "regression pass."
     )
 
 

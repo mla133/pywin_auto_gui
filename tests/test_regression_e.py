@@ -168,24 +168,28 @@ def test_e5_downloading_equation_files(app_ftp, device_ip, tmp_path):
 
 
 @pytest.mark.requires_device
-@pytest.mark.needs_live_verification
+@pytest.mark.special_case
 def test_e6_no_equation_file_to_download(app, device_ip):
     """
-    E6: No Equation File To Download (requires live AccuLoad device with
-    Equation.cfg deleted from /media/data/database, or a fresh AccuLoad
-    image).
-      Download File From AccuLoad -> Equations File -> a warning popup
-      notifies the user there is nothing to pull.
+    E6: No Equation File To Download - SPECIAL CASE, not part of the
+    standard regression pass.
+
+    Requires live AccuLoad device with Equation.cfg deleted from
+    /media/data/database, or a fresh AccuLoad image. Download File From
+    AccuLoad -> Equations File -> a warning popup notifies the user there
+    is nothing to pull.
 
     This repo cannot arrange the required device-side precondition (no
-    Equations file present on the AccuLoad), so this remains a documented,
-    environment-state-blocked skip - same class of gap as D8. If a device
-    ever legitimately has no Equations file, download_equation_file's
-    result "message" would hold the "no information to pull" warning text.
+    Equations file present on the AccuLoad), so this is documented as a
+    special case rather than run as part of the standard automated
+    regression suite - same class of gap as B14/C6/D8. If a device ever
+    legitimately has no Equations file, download_equation_file's result
+    "message" would hold the "no information to pull" warning text.
     """
     pytest.skip(
-        "E6 requires a device with no Equations file present - a device-side "
-        "state this repo cannot safely arrange or verify"
+        "E6: SPECIAL CASE - requires a device with no Equations file "
+        "present, a device-side state this repo cannot safely arrange or "
+        "verify; not part of the standard regression pass"
     )
 
 
