@@ -135,7 +135,7 @@ list and test references stay accurate.
 | F3  | Download Transaction Log (Large)                    | 🔧                   | `test_f3_download_transaction_log_large`                                                           |
 | F4  | Download Event Log                                  | 🔧                   | `test_f4_download_event_log`                                                                       |
 | F5  | Download Audit Trail Log                            | 🔧                   | `test_f5_download_audit_trail_log`                                                                 |
-| F6  | Upload/Download License Status File                 | 🙋 **manual**        | `test_f6_upload_download_license_status_file` — needs a real License Status file, not supplied     |
+| F6  | Upload/Download License Status File                 | 🙋 **manual** (`requires_device`, `needs_live_verification`) | `test_f6_upload_download_license_status_file` — implemented (uses `configs/F6.V2C` for upload; see docstring for the C2V/V2C naming-convention assumption), but marked `manual` until a live run confirms it — no device access yet |
 | F7  | No License Status To Download                       | 🔧 `requires_device` | `test_f7_no_license_status_to_download`                                                            |
 | F8  | Update AccuLoad Firmware                            | 🙋 **manual**        | `test_f8_update_accuload_firmware` — needs a firmware file + an unbuilt "Firmware Update" workflow |
 | F9  | Printing DriverDB Files (One Page)                  | ✅                    | `test_f9_printing_driverdb_files_one_page`                                                         |
@@ -174,8 +174,9 @@ list and test references stay accurate.
 - **~57** automated and passing in the default suite (✅).
 - **~40** automated but require an explicit marker override to run (🔧) —
   mostly `requires_device`, since a live AccuLoad isn't always reachable.
-- **5** genuinely manual, cannot be automated from this repo (🙋): F6, F8,
-  G1 (uninstall-while-running half only), G4, G5.
+- **5** genuinely/currently manual, cannot be automated or hasn't been
+  live-verified from this repo yet (🙋): F6 (implemented, awaiting a live
+  run), F8, G1 (uninstall-while-running half only), G4, G5.
 - **4** special cases needing a hand-arranged device state (🧩): B14, C6,
   D8, E6.
 - **1** deliberately out-of-scope group (🚫): H3-H8.
