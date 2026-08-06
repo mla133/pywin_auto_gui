@@ -67,6 +67,7 @@ import time
 
 from pywinauto.keyboard import send_keys
 from pywinauto import Application
+from pywinauto.findwindows import ElementAmbiguousError
 
 from controls.common_controls import get_list, get_list_row_texts
 from workflows.file_workflows import (
@@ -176,17 +177,45 @@ def open_edit_database_record_dialog(app_obj, row_index=0):
     return _get_dialog(app_obj, _EDIT_RECORD_DIALOG_TITLE, _EDIT_RECORD_DIALOG_CLASS)
 
 
-def _set_edit_field(uia_dlg, auto_id, value):
+def _set_edit_field(uia_dlg, auto_id, value, retries=5, retry_delay=0.3):
     """Reliable field-set pattern for this app's Edit controls: click to
     focus, select-all, type - UIA's set_edit_text() was seen to intermittently
     raise a COMError on freshly-opened dialogs in this app (live-confirmed on
-    the HID Format dialog specifically)."""
-    edit = uia_dlg.child_window(auto_id=auto_id, control_type="Edit")
-    edit.click_input()
-    time.sleep(0.15)
-    send_keys("^a")
-    send_keys(str(value))
-    time.sleep(0.15)
+    the HID Format dialog specifically).
+
+    RETRY-ON-AMBIGUOUS (F10 flake fix): the "Edit Database Record" dialog's
+    Field 1 (auto_id "1144") and the "HID Card Data Encoding" dialog's
+    Card # (also auto_id "1144") share the same automation_id - normally
+    harmless since the two dialogs are never open simultaneously, but when
+    driving many back-to-back Edit Database Record cycles (as F10 does, 70
+    times), the just-closed HID Format dialog can still be mid-teardown in
+    the UIA tree the instant the next lookup runs, so *two* "1144" Edit
+    elements transiently exist and pywinauto raises ElementAmbiguousError
+    instead of resolving to the one in `uia_dlg`. Retrying the lookup after
+    a brief settle delay resolves it once the stale dialog finishes
+    disappearing from the tree - live-confirmed as an intermittent,
+    non-reproducible timing issue (see enter_hid_format_id's caller,
+    tests/test_regression_f.py::test_f10_..., for the original report)."""
+    last_error = None
+    for attempt in range(retries):
+        try:
+            edit = uia_dlg.child_window(auto_id=auto_id, control_type="Edit")
+            edit.click_input()
+            time.sleep(0.15)
+            send_keys("^a")
+            send_keys(str(value))
+            time.sleep(0.15)
+            return
+        except ElementAmbiguousError as e:
+            last_error = e
+            print(
+                f"[WARN] ElementAmbiguousError resolving Edit auto_id={auto_id!r} "
+                f"(attempt {attempt + 1}/{retries}) - likely a stale dialog still "
+                "settling in the UIA tree; retrying after a short delay"
+            )
+            time.sleep(retry_delay)
+
+    raise last_error
 
 
 def _read_edit_field(win32_dlg, auto_id):

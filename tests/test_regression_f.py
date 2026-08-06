@@ -343,16 +343,19 @@ def test_f10_printing_driverdb_files_multiple_pages(app, tmp_path):
     to genuinely overflow onto a 2nd page. RESOLVED - see module
     docstring "F9-F13 LIVE FINDING". Live-verified: PASS (2 pages).
 
-    NOTE (intermittent flake, unrelated to the print blocker fix above):
-    driving 70 sequential "Edit Database Record" dialog cycles has
+    HARDENED (was an intermittent flake, unrelated to the print blocker fix
+    above): driving 70 sequential "Edit Database Record" dialog cycles
     occasionally hit a transient `pywinauto.findwindows.ElementAmbiguousError`
-    on the Field 1 edit box (auto_id "1144" briefly matches 2 elements -
-    likely a UIA tree still settling from the previous row's dialog close).
-    Not reliably reproducible; a retry of the whole test has always then
-    passed. If this recurs often enough to be worth hardening,
-    `set_driver_record_fields`/`enter_hid_format_id` in
-    `driver_db_workflows.py` would be the place to add a short settle-poll
-    or retry around the Field 1 lookup.
+    on the Field 1 edit box - root cause: Field 1 (auto_id "1144") in
+    "Edit Database Record" shares its automation_id with Card # in the
+    nested "HID Card Data Encoding" dialog, and the just-closed HID dialog
+    can still be mid-teardown in the UIA tree the instant the next lookup
+    runs, so two "1144" Edit elements transiently exist. Fixed by adding a
+    retry-with-settle-delay around the Edit lookup in
+    `driver_db_workflows._set_edit_field` (catches ElementAmbiguousError,
+    waits briefly, retries) - not reliably reproducible, so this fix has
+    not yet been re-confirmed with a dedicated repro run; re-verify by
+    re-running this test a few times if the flake recurs.
     """
     create_new_driver_database_file(app)
     for row_index in range(70):
