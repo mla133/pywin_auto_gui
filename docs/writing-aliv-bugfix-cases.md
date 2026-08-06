@@ -11,10 +11,10 @@ rather than `pytest`. This page covers when and how to add one.
 
 Use an `ALIV-<number>.md` bugfix case when:
 
-- You're verifying the fix for a **specific Jira ticket** (`ALIV-1234`), not a
+- You're verifying the fix for a **specific Assembla ticket** (`ALIV-1234`), not a
   general feature area already covered by `regression.md`.
 - The verification steps come from a **real, human-written test-case
-  document** (Confluence/Jira export) with prose instructions and an
+  document** (Assembla export) with prose instructions and an
   `Expected Result`/`[PASS/FAIL]` line — not something you're authoring from
   scratch in scenario-runner's plain-English grammar.
 - The case is a **one-off snap-in check**: something worth being able to
@@ -35,7 +35,7 @@ see the "Ad-hoc scenarios" section of `adding-a-test.md`.
 ## Naming convention (required)
 
 The file **must** be named `scenarios/ALIV-<number>.md` (e.g.
-`scenarios/ALIV-4085.md`) — the Jira ticket ID for the bug it documents. This
+`scenarios/ALIV-4085.md`) — the Assembla ticket ID for the bug it documents. This
 is a pure filename convention: `test_case_runner.py` auto-discovers any file
 matching `scenarios/ALIV-*.md` via `discover_bugfix_files()`. There is no
 registration step, list, or import to update — just drop the file in
@@ -45,10 +45,10 @@ registration step, list, or import to update — just drop the file in
 Don't name a generated report file this way — `*-report.md` files living
 alongside a bugfix case are excluded from discovery automatically.
 
-## Document format (Confluence wiki markup)
+## Document format (Assembla wiki markup)
 
 Unlike `regression.md` or scenario-runner's plain Markdown, these files use
-the wiki markup Jira/Confluence exports as-is. Keep that format when
+the wiki markup Assembla exports as-is. Keep that format when
 authoring a new one — don't convert it to `#`/`##` Markdown headers:
 
 ```

@@ -111,7 +111,7 @@ pytest -s -v tests/unit_test_uia_inspection.py
 # Plain-English scenario, no pytest test needed
 python scenario_runner.py scenarios/example_connect_and_save.md
 
-# Hybrid auto/manual runner for formal Jira/Confluence-style test docs
+# Hybrid auto/manual runner for formal Assembla-style test docs
 python test_case_runner.py scenarios/ALIV-3929.md --report scenarios/ALIV-3929-report.md
 python test_case_runner.py --list-bugfixes
 python test_case_runner.py --bugfix ALIV-4085

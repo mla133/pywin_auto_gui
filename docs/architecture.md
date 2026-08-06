@@ -141,7 +141,7 @@ If a test behaves inexplicably, check `Get-Process AccuMate` first.
 1. **pytest** (`tests/test_*.py`) — the primary, CI-friendly path. Full
    assertions, fixtures, markers.
 2. **Plain-English runners** (`scenario_runner.py`, `test_case_runner.py`)
-   — for fast manual exploration/reproduction or for real Jira/Confluence
+   — for fast manual exploration/reproduction or for real Assembla
    test-case documents that mix automatable and genuinely-manual steps.
    These reuse the exact same `workflows/`/`pages.MainPage` functions as
    the pytest suite; they're a different *front door* onto the same
