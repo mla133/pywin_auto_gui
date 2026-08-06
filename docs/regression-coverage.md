@@ -5,6 +5,15 @@ to its automation state in `tests/`. Regenerate/update this whenever a
 scenario's status changes (e.g. a `manual`/`special_case`/
 `needs_live_verification` marker is added or removed).
 
+**Drift guard**: `tests/test_regression_coverage_doc.py` runs as part of
+the default suite (no live app/device needed) and fails the build if this
+doc ever falls out of sync — it checks that every `scenarios/regression.md`
+scenario ID has a row here (and vice versa), and that every `test_...`
+reference in the Test column still resolves to a real, existing test
+function. It won't catch every kind of drift (e.g. a Status column that no
+longer matches a test's actual markers), but it does guarantee the ID
+list and test references stay accurate.
+
 **Legend:**
 
 - ✅ **Automated** — live-verified passing, runs as part of the default `pytest -s -v` suite.
