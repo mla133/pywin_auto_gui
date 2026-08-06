@@ -108,6 +108,15 @@ def _build_styles():
         name="Docstring", parent=styles["BodyText"], fontSize=9, leading=12,
         spaceAfter=8,
     ))
+    styles.add(ParagraphStyle(
+        # Used for table cells that may contain long, unbroken strings
+        # (pytest node IDs like "tests/foo.py::test_x[param-with-no-spaces]",
+        # comma-joined marker lists) - wordWrap=None + the small font size
+        # let reportlab break mid-word when a cell's content is wider than
+        # its column, instead of silently overflowing past the page margin.
+        name="WrapCell", parent=styles["BodyText"], fontSize=8, leading=10,
+        wordWrap=None,
+    ))
     return styles
 
 
@@ -193,8 +202,8 @@ def _detail_flowables_for_result(result, styles):
         [
             ["Outcome", result.outcome.upper()],
             ["Duration", f"{result.duration:.2f}s"],
-            ["Markers", markers_text],
-            ["Node ID", result.nodeid],
+            ["Markers", Paragraph(markers_text, styles["WrapCell"])],
+            ["Node ID", Paragraph(result.nodeid, styles["WrapCell"])],
         ],
         colWidths=[1.2 * inch, 5.3 * inch],
     )
