@@ -1,3 +1,4 @@
+import os
 import time
 
 from pywinauto import Desktop
@@ -110,6 +111,7 @@ def send_command(win, command, settle_time=2.0):
 def wait_for_progress_dialog_to_close(
     app_obj, timeout=400, poll_interval=2.0, appear_timeout=15,
     title_substrings=("Writing data", "Downloading", "Reading"),
+    screenshot_path=None,
 ):
     """
     Wait for the "Writing data in <config> to <device> [NN%]" / "Downloading
@@ -167,13 +169,23 @@ def wait_for_progress_dialog_to_close(
     matching window while it was clearly visible on screen), unlike
     Desktop(backend="win32").windows() filtered by process_id.
 
+    `screenshot_path`, if given, captures a screenshot of the progress
+    window itself (not the underlying main app window) the first time
+    it's observed open, and saves it to that path - lets a caller record
+    real evidence of the in-progress transfer/migration dialog (e.g. for
+    record_step()'s screenshot in a PDF report), instead of only being
+    able to screenshot the main window after this function returns, by
+    which point the progress window (and any dialog around it) has
+    already closed.
+
     Returns True if the window closed within `timeout` seconds, False if it
     was still open when the timeout elapsed (never raises for a timeout -
     callers should treat False as "transfer still in progress / stuck").
     """
     pid = app_obj.get_window().process_id()
+    screenshot_taken = False
 
-    def _progress_window_open():
+    def _find_progress_window():
         try:
             windows = Desktop(backend="win32").windows()
         except Exception:
@@ -183,7 +195,7 @@ def wait_for_progress_dialog_to_close(
             # before the per-window try/except below even runs. Treat this
             # as "couldn't tell this poll" rather than letting it propagate
             # and fail the whole wait.
-            return False
+            return None
 
         for w in windows:
             try:
@@ -191,16 +203,32 @@ def wait_for_progress_dialog_to_close(
                     continue
                 title = w.window_text()
                 if any(sub in title for sub in title_substrings):
-                    return True
+                    return w
             except Exception:
                 continue
-        return False
+        return None
+
+    def _maybe_screenshot(win):
+        nonlocal screenshot_taken
+        if not screenshot_path or screenshot_taken or win is None:
+            return
+        try:
+            img = win.capture_as_image()
+            if img:
+                os.makedirs(os.path.dirname(screenshot_path) or ".", exist_ok=True)
+                img.save(screenshot_path)
+                screenshot_taken = True
+                print(f"[INFO] Progress dialog screenshot saved: {screenshot_path}")
+        except Exception as exc:
+            print(f"[WARN] Could not capture progress dialog screenshot: {exc}")
 
     appear_start = time.time()
     seen_open = False
     while time.time() - appear_start < appear_timeout:
-        if _progress_window_open():
+        win = _find_progress_window()
+        if win is not None:
             seen_open = True
+            _maybe_screenshot(win)
             break
         time.sleep(0.5)
 
@@ -215,9 +243,11 @@ def wait_for_progress_dialog_to_close(
     start = time.time()
 
     while time.time() - start < timeout:
-        if not _progress_window_open():
+        win = _find_progress_window()
+        if win is None:
             return True
 
+        _maybe_screenshot(win)
         time.sleep(poll_interval)
 
     return False

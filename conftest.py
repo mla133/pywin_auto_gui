@@ -311,21 +311,28 @@ def record_step(request):
                         app=app, note="Migration notice text", screenshot=True)
 
     Pass `app=<the test's app fixture value>` and `screenshot=True` to
-    capture a screenshot at that point (saved under
-    screenshots/<test_name>/ alongside the test's other captures) -
-    recommended for any step that verifies/confirms UI state, since a
-    screenshot is the actual evidence for that verdict. Steps recorded
-    this way are picked up by pytest_runtest_makereport below and
-    attached to the TestResult passed to build_pdf_report(); docstring
-    steps with no matching recorded step number render exactly as
-    before (plain, unannotated) - this is purely additive/opt-in.
+    capture a screenshot of the main app window at record_step()'s own
+    call time (saved under screenshots/<test_name>/). IMPORTANT: if the
+    thing actually being verified is a transient dialog/popup (e.g. a
+    migration/progress dialog) that's already been dismissed by the time
+    record_step() is called, that screenshot only shows the main window
+    *after* the dialog closed, not the dialog itself - a real gap found
+    live on test_a4. For that case, capture the screenshot *while the
+    dialog is on screen* inside the workflow function itself (see e.g.
+    workflows/file_workflows.py's load_and_migrate_old_config_file()
+    `screenshot_dir` param) and pass the resulting path directly via
+    `screenshot_path=<path>` instead of `screenshot=True`.
+
+    Steps recorded this way are picked up by pytest_runtest_makereport
+    below and attached to the TestResult passed to build_pdf_report();
+    docstring steps with no matching recorded step number render exactly
+    as before (plain, unannotated) - this is purely additive/opt-in.
     """
     steps = []
     request.node._recorded_steps = steps
 
-    def _record(step_number, outcome="passed", note="", app=None, screenshot=False):
-        screenshot_path = None
-        if screenshot and app is not None:
+    def _record(step_number, outcome="passed", note="", app=None, screenshot=False, screenshot_path=None):
+        if screenshot_path is None and screenshot and app is not None:
             screenshot_path = _capture_step_screenshot(app, request.node.name, step_number)
         steps.append(StepResult(
             step_number=step_number,

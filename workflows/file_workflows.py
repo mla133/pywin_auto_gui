@@ -1,6 +1,7 @@
 import time
 import os
 import re
+from dataclasses import dataclass
 from pywinauto.keyboard import send_keys
 from pywinauto import Application
 
@@ -103,6 +104,48 @@ _MIGRATION_PROGRESS_TITLE_SUBSTRING = "Migrating AccuMate Configuration"
 _MIGRATION_COMPLETE_TEXT_RE = r"new file named '([^']+)'"
 
 
+@dataclass
+class MigrationResult:
+    """
+    Return value of load_and_migrate_old_config_file(): the migrated
+    file's path, plus screenshots of each of the three real migration
+    dialogs (captured *while each dialog is actually on screen*, not
+    afterward) when `screenshot_dir` is passed - None for any dialog
+    whose screenshot wasn't requested/couldn't be captured.
+    """
+    __test__ = False
+
+    migrated_path: str
+    notice_screenshot: str = None
+    progress_screenshot: str = None
+    completion_screenshot: str = None
+
+
+def _capture_dialog_screenshot(dlg, screenshot_dir, label):
+    """
+    Captures a screenshot of a specific dialog wrapper (not the main app
+    window) into screenshot_dir/<label>_<timestamp>.png. Returns the path,
+    or None if screenshot_dir wasn't given or the capture failed - a
+    capture failure is swallowed/warned rather than raised, since it
+    should never mask the real dialog-handling result.
+    """
+    if not screenshot_dir:
+        return None
+    try:
+        import datetime as _datetime
+        os.makedirs(screenshot_dir, exist_ok=True)
+        timestamp = _datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(screenshot_dir, f"{label}_{timestamp}.png")
+        img = dlg.capture_as_image()
+        if img:
+            img.save(path)
+            print(f"[INFO] {label} dialog screenshot saved: {path}")
+            return path
+    except Exception as exc:
+        print(f"[WARN] Could not capture {label} dialog screenshot: {exc}")
+    return None
+
+
 def _click_button_by_title(dlg, title):
     """
     Click a Button descendant matching `title` on an already-resolved
@@ -121,18 +164,29 @@ def _click_button_by_title(dlg, title):
     raise RuntimeError(f"Could not find a '{title}' button on dialog {dlg.window_text()!r}")
 
 
-def load_and_migrate_old_config_file(app_obj, config_path, close_existing=True, migration_timeout=120):
+def load_and_migrate_old_config_file(app_obj, config_path, close_existing=True, migration_timeout=120,
+                                      screenshot_dir=None):
     """
     Open an old-format .AL4 config file (created with an earlier AccuMate
     version) and drive the real migration flow described above to
-    completion, returning the full path to the newly-created, migrated
-    file (same directory as `config_path`, named per the completion
-    dialog's own message).
+    completion, returning a MigrationResult with the full path to the
+    newly-created, migrated file (same directory as `config_path`, named
+    per the completion dialog's own message).
 
     Does NOT wait for the Config Directory tree afterward (unlike
     load_config_file) - live testing confirmed the original document view
     closes once migration completes, so there's no tree to wait for; open
     the returned migrated path (e.g. via load_config_file) to inspect it.
+
+    Pass `screenshot_dir` to capture a screenshot of each of the three
+    real migration dialogs (notice, in-progress, completion) *while each
+    is actually on screen* - by the time this function returns, all three
+    have already been dismissed, so screenshotting the main app window
+    afterward (e.g. from a caller's own record_step()) misses them
+    entirely; this was a real, confirmed gap (a "verify migration"
+    PDF-report step captured only the underlying app window, not the
+    migration dialog itself). Screenshot capture failures are swallowed/
+    warned, never raised - see MigrationResult.
 
     Raises RuntimeError if the expected notice/completion dialogs, or the
     migrated filename within the completion dialog's message, aren't found.
@@ -161,16 +215,25 @@ def load_and_migrate_old_config_file(app_obj, config_path, close_existing=True, 
         )
 
     print(f"[INFO] Migration notice: {notice_text!r}")
+    notice_screenshot = _capture_dialog_screenshot(notice_dlg, screenshot_dir, "migration_notice")
     _click_button_by_title(notice_dlg, "OK")
 
     print("[STEP] Waiting for the 'Migrating AccuMate Configuration' progress window to close")
+    progress_screenshot_path = None
+    if screenshot_dir:
+        import datetime as _datetime
+        os.makedirs(screenshot_dir, exist_ok=True)
+        timestamp = _datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        progress_screenshot_path = os.path.join(screenshot_dir, f"migration_progress_{timestamp}.png")
     completed = wait_for_progress_dialog_to_close(
-        app_obj, timeout=migration_timeout, title_substrings=(_MIGRATION_PROGRESS_TITLE_SUBSTRING,)
+        app_obj, timeout=migration_timeout, title_substrings=(_MIGRATION_PROGRESS_TITLE_SUBSTRING,),
+        screenshot_path=progress_screenshot_path,
     )
     if not completed:
         raise RuntimeError(
             f"Migration did not complete within {migration_timeout}s (progress window still open)"
         )
+    progress_screenshot = progress_screenshot_path if progress_screenshot_path and os.path.isfile(progress_screenshot_path) else None
 
     print("[STEP] Waiting for migration completion dialog")
     complete_dlg_spec = app_obj.app.window(title=_MIGRATION_DIALOG_TITLE, class_name=_MIGRATION_DIALOG_CLASS)
@@ -188,10 +251,16 @@ def load_and_migrate_old_config_file(app_obj, config_path, close_existing=True, 
     migrated_path = os.path.join(os.path.dirname(config_path), migrated_filename)
 
     print(f"[INFO] Migration completed: {migrated_path}")
+    completion_screenshot = _capture_dialog_screenshot(complete_dlg, screenshot_dir, "migration_completion")
     _click_button_by_title(complete_dlg, "OK")
     time.sleep(0.5)
 
-    return migrated_path
+    return MigrationResult(
+        migrated_path=migrated_path,
+        notice_screenshot=notice_screenshot,
+        progress_screenshot=progress_screenshot,
+        completion_screenshot=completion_screenshot,
+    )
 
 def open_file_dialog(app_obj, file_path):
     win = app_obj.get_window()
