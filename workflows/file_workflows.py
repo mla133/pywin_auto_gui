@@ -347,8 +347,28 @@ def load_config_file(app_obj, config_path, close_existing=True, wait_for_tree=Tr
     open_file_dialog(app_obj, config_path)
 
     if wait_for_tree:
+        from workflows.comm_workflows import wait_for_warning_dialog, dismiss_dialog
+
         start = time.time()
         while time.time() - start < tree_timeout:
+            # A loaded config attempts its own auto-connect using its
+            # baked-in comm settings before the tree populates - this can
+            # pop a warning dialog (e.g. "arm configured for use, but the
+            # arm address is 0", seen live even on a config with otherwise
+            # correct settings, apparently a transient race during the
+            # auto-connect attempt) that blocks the tree from ever
+            # appearing if left unhandled. Dismiss it and keep polling
+            # rather than let it silently time this out.
+            dlg = wait_for_warning_dialog(app_obj, timeout=0.5)
+            if dlg is not None:
+                print(f"[INFO] Dismissing dialog during config load: {dlg.window_text()!r}")
+                try:
+                    dismiss_dialog(dlg)
+                except Exception as e:
+                    print(f"[WARN] Failed to dismiss dialog during config load: {e}")
+                time.sleep(0.5)
+                continue
+
             try:
                 if get_tree(app_obj).roots():
                     return

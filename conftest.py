@@ -61,6 +61,20 @@ def pytest_addoption(parser):
         ),
     )
     parser.addoption(
+        "--accumate-arm-addresses",
+        action="store",
+        default=None,
+        metavar="N,N,...",
+        help=(
+            "Comma-separated per-arm Communications Addresses matching the physical "
+            "AccuLoad device at --accumate-device-ip (e.g. '1' for a single-arm device, "
+            "'1,2,3' for three arms) - a real device can validly have anywhere from 1 to "
+            "6 arms configured, and the Communications Settings arm addresses must match "
+            f"whatever the loaded config's own arm count declares. Defaults to "
+            f"{DEFAULT_ACCUMATE_ARM_ADDRESSES} if not passed."
+        ),
+    )
+    parser.addoption(
         "--pdf-report",
         action="store",
         default=None,
@@ -240,8 +254,14 @@ def device_arm_addresses(request):
     Per-arm Communications Addresses matching the physical AccuLoad device
     at `device_ip`, required for AccuMate to actually connect to it (see
     DEFAULT_ACCUMATE_ARM_ADDRESSES for why this can't just use a blank
-    config's defaults).
+    config's defaults). A real device can validly have anywhere from 1 to
+    6 arms configured - pass --accumate-arm-addresses to match a specific
+    device (e.g. '1' for a single-arm device).
     """
+    raw = request.config.getoption("--accumate-arm-addresses")
+    if raw:
+        return [int(x.strip()) for x in raw.split(",") if x.strip()]
+
     return DEFAULT_ACCUMATE_ARM_ADDRESSES
 
 
