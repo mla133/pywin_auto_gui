@@ -1,0 +1,18 @@
+Render docstring numbered steps as a proper list in PDF report
+
+Description sections previously joined every line of a test's docstring
+into one dense run-on paragraph, making numbered step lists (the common
+style across tests/test_regression_*.py) hard to read.
+
+Add _docstring_flowables(): splits a docstring into blank-line-separated
+blocks, merges wrapped continuation lines back onto their numbered step,
+and renders any block containing numbered steps ("1. ...", "2. ...") as
+separate hanging-indent paragraphs (one per step) instead of a single
+Paragraph. Non-list blocks (intro/trailing prose) still render as plain
+paragraphs, same as before.
+
+Verified live against test_a4_loading_old_al4_config_files (steps
+10-13) - the PDF now shows each step on its own line instead of one
+run-on block.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>

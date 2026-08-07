@@ -16,6 +16,7 @@ or pytest session required.
 """
 import glob
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -109,6 +110,13 @@ def _build_styles():
         spaceAfter=8,
     ))
     styles.add(ParagraphStyle(
+        # A single numbered-step line (e.g. "1. Open a saved file.") -
+        # hanging indent so a wrapped continuation line lines up under the
+        # step text rather than back under the number.
+        name="DocstringStep", parent=styles["Docstring"], leftIndent=16,
+        firstLineIndent=-16, spaceAfter=3,
+    ))
+    styles.add(ParagraphStyle(
         # Used for table cells that may contain long, unbroken strings
         # (pytest node IDs like "tests/foo.py::test_x[param-with-no-spaces]",
         # comma-joined marker lists) - wordWrap=None + the small font size
@@ -191,6 +199,65 @@ def _summary_flowables(results, run_started, run_finished, styles):
     return flowables
 
 
+_NUMBERED_STEP_RE = re.compile(r"^\d+[\.\)]\s+")
+
+
+def _docstring_flowables(docstring, styles):
+    """
+    Renders a test's docstring as one or more flowables instead of a
+    single run-on paragraph, so multi-paragraph text and numbered step
+    lists (the common style used across tests/test_regression_*.py, e.g.
+    "1. Open a saved file.\n2. Print it.\n3. Verify...") stay readable
+    instead of collapsing into one dense block.
+
+    Blocks are split on blank lines (paragraph breaks). Within a block, a
+    line starting with "N." or "N)" starts a new numbered step; any
+    following non-numbered line is treated as a wrapped continuation of
+    that step and merged onto it with a space. A block containing at
+    least one numbered line is rendered as a sequence of "DocstringStep"
+    paragraphs (hanging indent, so wrapped continuations still line up
+    under the step text); any other block is rendered as a single plain
+    "Docstring" paragraph, same as before.
+    """
+    raw_lines = docstring.strip().splitlines()
+    # Dedent: strip only the common leading whitespace pytest docstrings
+    # pick up from source indentation, not intentional list indent.
+    stripped_lines = [line.strip() for line in raw_lines]
+
+    blocks = []
+    current_block = []
+    for line in stripped_lines:
+        if not line:
+            if current_block:
+                blocks.append(current_block)
+                current_block = []
+            continue
+        current_block.append(line)
+    if current_block:
+        blocks.append(current_block)
+
+    flowables = []
+    for block in blocks:
+        items = []
+        for line in block:
+            if _NUMBERED_STEP_RE.match(line):
+                items.append(line)
+            elif items:
+                # Continuation of a wrapped numbered step's text.
+                items[-1] = f"{items[-1]} {line}"
+            else:
+                items.append(line)
+
+        is_numbered_list = any(_NUMBERED_STEP_RE.match(item) for item in items)
+        if is_numbered_list:
+            for item in items:
+                flowables.append(Paragraph(item, styles["DocstringStep"]))
+        else:
+            flowables.append(Paragraph(" ".join(items), styles["Docstring"]))
+
+    return flowables
+
+
 def _detail_flowables_for_result(result, styles):
     flowables = []
 
@@ -220,11 +287,11 @@ def _detail_flowables_for_result(result, styles):
 
     if result.docstring:
         flowables.append(Paragraph("<b>Description</b>", styles["BodyText"]))
-        # Docstrings can be long/multi-paragraph free text (see e.g.
-        # tests/test_regression_f.py) - use a wrapping Paragraph rather
-        # than Preformatted so it reflows naturally across page width.
-        cleaned = " ".join(line.strip() for line in result.docstring.strip().splitlines())
-        flowables.append(Paragraph(cleaned, styles["Docstring"]))
+        # Docstrings can be long/multi-paragraph free text with numbered
+        # step lists (see e.g. tests/test_regression_f.py) - render each
+        # paragraph/step as its own flowable so lists stay readable
+        # instead of collapsing into one dense run-on paragraph.
+        flowables.extend(_docstring_flowables(result.docstring, styles))
 
     if result.outcome in ("failed", "error") and result.longrepr:
         flowables.append(Paragraph("<b>Failure Detail</b>", styles["BodyText"]))
