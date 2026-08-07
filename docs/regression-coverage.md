@@ -184,3 +184,23 @@ list and test references stay accurate.
 Plus an open-ended, separately-tracked set of one-off bugfix regression
 cases (`scenarios/ALIV-*.md`, run via `test_case_runner.py`) not part of
 this ID-by-ID matrix — see [`adding-a-test.md`](adding-a-test.md).
+
+## Ad-hoc field diagnostics (not part of the ID matrix)
+
+Some tests exist purely to investigate a specific, currently-open field
+bug report rather than to automate a `regression.md` scenario. These are
+marked `manual_investigation` (excluded from both the default run and
+`-m disruptive` regression passes — run explicitly by node id or
+`-m manual_investigation`) and are not tracked in the table above:
+
+- **`tests/test_field_push_hang_diagnostic.py::test_field_push_all_hang_diagnostic`**
+  — investigates a field report that "Push All to AccuLoad" hangs partway
+  through transferring a full configuration on the latest build. Loads a
+  caller-supplied config (via `--accumate-config-file`), connects, clicks
+  Push All, then monitors the transfer's live `[NN%]` progress using
+  `workflows.terminal_emulator.wait_for_push_pull_with_stall_detection` —
+  which distinguishes a genuine **stall** (no percentage change for 60
+  consecutive seconds) from the transfer simply being slow/large, and
+  captures a screenshot of the live progress dialog plus an
+  AccuMate-responsiveness check when a stall is detected.
+

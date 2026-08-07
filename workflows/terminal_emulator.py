@@ -1,9 +1,13 @@
 import os
+import re
 import time
+from dataclasses import dataclass, field
 
 from pywinauto import Desktop
 
 from controls.ribbon_controls import click_ribbon_button
+
+_PERCENT_RE = re.compile(r"\[(\d{1,3})%\]")
 
 # The Terminal Emulator is opened via the ribbon "Terminal Emulator" button
 # (only enabled while AccuMate has a live device connection - see
@@ -252,6 +256,206 @@ def wait_for_progress_dialog_to_close(
 
     return False
 
+
+@dataclass
+class PushPullDiagnostics:
+    """
+    Result of `wait_for_push_pull_with_stall_detection()`. Unlike the plain
+    boolean returned by `wait_for_progress_dialog_to_close()`, this captures
+    enough evidence to tell "the transfer is stuck" apart from "the transfer
+    is just slow" - see that function's docstring for why this distinction
+    matters for a real field-reported hang.
+    """
+    completed: bool
+    stalled: bool
+    last_percent: int = None
+    stall_duration: float = 0.0
+    final_title: str = None
+    progress_screenshot: str = None
+    percent_history: list = field(default_factory=list)  # [(elapsed_seconds, percent), ...]
+    app_responsive: bool = None
+
+
+def _is_window_responsive(hwnd, timeout_ms=2000):
+    """
+    Check whether a window is still responding to messages, using the same
+    mechanism Windows itself uses to decide whether to tag a window
+    "(Not Responding)" in the taskbar/Task Manager. Distinguishes "AccuMate
+    itself has hung" from "AccuMate is fine, the device transfer is just
+    stuck" when investigating a stall.
+
+    Returns True/False, or None if the check itself couldn't be performed
+    (e.g. win32gui unavailable) - callers should treat None as "unknown",
+    not as evidence either way.
+    """
+    try:
+        import win32con
+        import win32gui
+
+        # SendMessageTimeout with SMTO_ABORTIFHUNG returns 0 (and sets a
+        # last-error) if the window doesn't respond within timeout_ms -
+        # this is the standard way to probe for a hung window without
+        # risking blocking indefinitely on a truly wedged app.
+        result = win32gui.SendMessageTimeout(
+            hwnd, win32con.WM_NULL, 0, 0, win32con.SMTO_ABORTIFHUNG, timeout_ms
+        )
+        # PyWin32 returns a (result, return_value) tuple on success.
+        return result is not None
+    except Exception:
+        return None
+
+
+def wait_for_push_pull_with_stall_detection(
+    app_obj, timeout=900, stall_threshold=60, poll_interval=2.0, appear_timeout=15,
+    title_substrings=("Writing data",), screenshot_dir=None,
+):
+    """
+    Diagnostic variant of `wait_for_progress_dialog_to_close()` built for
+    investigating a real field report: "Push All to AccuLoad" appears to
+    hang partway through transferring a full configuration on the latest
+    build. A plain timeout can't tell a genuine hang apart from a transfer
+    that's simply large/slow (a full push was clocked live at ~300-350s
+    for a blank/default config - see that function's docstring), so this
+    tracks the live `[NN%]` percentage carried in the progress window's
+    title (same window/detection mechanism as
+    `wait_for_progress_dialog_to_close`) and declares a **stall** - not
+    just "still running" - only if the percentage hasn't advanced for
+    `stall_threshold` consecutive seconds.
+
+    On stall detection, captures:
+    - A screenshot of the live progress window itself (same
+      `capture_as_image()` technique used elsewhere in this module).
+    - Whether the main AccuMate window is still responding to messages
+      (`_is_window_responsive`) - this distinguishes "AccuMate itself has
+      hung" from "AccuMate is fine, the device-side transfer is just
+      stuck", which points at very different root causes.
+    - The full percent/time history observed so far, for later analysis
+      (e.g. plotting where in the transfer it stalled).
+
+    Returns a `PushPullDiagnostics` describing the outcome. Never raises for
+    a timeout or a stall - callers should inspect `.completed`/`.stalled`
+    and decide what to do (e.g. fail the test with the diagnostics
+    attached).
+    """
+    pid = app_obj.get_window().process_id()
+    percent_history = []
+    screenshot_taken = {"done": False}
+    wait_start = time.time()
+
+    def _find_progress_window():
+        try:
+            windows = Desktop(backend="win32").windows()
+        except Exception:
+            return None
+
+        for w in windows:
+            try:
+                if w.process_id() != pid or not w.is_visible():
+                    continue
+                title = w.window_text()
+                if any(sub in title for sub in title_substrings):
+                    return w
+            except Exception:
+                continue
+        return None
+
+    def _capture_screenshot(win):
+        if not screenshot_dir or screenshot_taken["done"] or win is None:
+            return None
+        try:
+            import datetime as _datetime
+
+            os.makedirs(screenshot_dir, exist_ok=True)
+            timestamp = _datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(screenshot_dir, f"push_pull_stall_{timestamp}.png")
+            img = win.capture_as_image()
+            if img:
+                img.save(path)
+                screenshot_taken["done"] = True
+                print(f"[INFO] Push/Pull progress screenshot saved: {path}")
+                return path
+        except Exception as exc:
+            print(f"[WARN] Could not capture push/pull progress screenshot: {exc}")
+        return None
+
+    appear_start = time.time()
+    seen_open = False
+    win = None
+    while time.time() - appear_start < appear_timeout:
+        win = _find_progress_window()
+        if win is not None:
+            seen_open = True
+            break
+        time.sleep(0.5)
+
+    if not seen_open:
+        print(
+            "[WARN] Push/Pull progress window never observed opening within "
+            f"{appear_timeout}s - proceeding to close-wait anyway in case the "
+            "transfer was too fast to catch it."
+        )
+
+    last_percent = None
+    last_change_time = time.time()
+    final_title = None
+    screenshot_path = None
+
+    while time.time() - wait_start < timeout:
+        win = _find_progress_window()
+        if win is None:
+            print("[INFO] Push/Pull progress window closed - transfer completed")
+            return PushPullDiagnostics(
+                completed=True,
+                stalled=False,
+                last_percent=last_percent,
+                final_title=final_title,
+                progress_screenshot=screenshot_path,
+                percent_history=percent_history,
+            )
+
+        final_title = win.window_text()
+        match = _PERCENT_RE.search(final_title)
+        current_percent = int(match.group(1)) if match else None
+
+        now = time.time()
+        elapsed = now - wait_start
+        if current_percent is not None and current_percent != last_percent:
+            percent_history.append((elapsed, current_percent))
+            print(f"[INFO] Push/Pull progress: {current_percent}% (t={elapsed:.1f}s)")
+            last_percent = current_percent
+            last_change_time = now
+
+        stall_duration = now - last_change_time
+        if stall_duration >= stall_threshold:
+            print(
+                f"[ERROR] Push/Pull transfer appears STALLED: no percentage "
+                f"change for {stall_duration:.1f}s (last seen: {last_percent}%, "
+                f"title: {final_title!r})"
+            )
+            screenshot_path = _capture_screenshot(win)
+            main_hwnd = app_obj.get_window().handle
+            app_responsive = _is_window_responsive(main_hwnd)
+            return PushPullDiagnostics(
+                completed=False,
+                stalled=True,
+                last_percent=last_percent,
+                stall_duration=stall_duration,
+                final_title=final_title,
+                progress_screenshot=screenshot_path,
+                percent_history=percent_history,
+                app_responsive=app_responsive,
+            )
+
+        time.sleep(poll_interval)
+
+    print(f"[WARN] Push/Pull did not complete within {timeout}s (no stall detected, still progressing)")
+    return PushPullDiagnostics(
+        completed=False,
+        stalled=False,
+        last_percent=last_percent,
+        final_title=final_title,
+        percent_history=percent_history,
+    )
 
 
 def switch_to_home_ribbon_tab(app_obj):
