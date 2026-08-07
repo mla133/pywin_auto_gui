@@ -16,9 +16,9 @@ _APP_EXE_INSTALLED_FALLBACK = r"C:\\Users\\allenma\\AppData\\Local\\Guidant\\Acc
 def _resolve_app_exe_path(env_var, relative_candidate, fallback):
     """
     Resolve a real AccuMate.exe path with the following precedence, so this
-    repo works out of the box for any developer once embedded as the
-    `testing/automated` git submodule inside the acculoadiv.AccuMate
-    product repo (as well as for anyone still running it standalone):
+    code works out of the box for any developer once embedded at
+    `testing/automated` inside the acculoadiv.AccuMate product repo
+    (as well as for anyone still running it standalone):
 
     1. The given environment variable, if set - an explicit override,
        always wins regardless of what's on disk.
