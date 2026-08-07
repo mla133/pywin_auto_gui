@@ -272,5 +272,61 @@ def configure_ip_and_connect(app_obj, ip_address, timeout=45, arm_addresses=None
     click_ribbon_button(uia_win, "Retry Comm")
 
     print(f"[STEP] Waiting up to {timeout}s for AccuMate to report a live connection")
-    return app_obj.wait_for_device_connection(timeout=timeout)
+    return _wait_for_connection_dismissing_dialogs(app_obj, timeout=timeout)
+
+
+def _wait_for_connection_dismissing_dialogs(app_obj, timeout):
+    """
+    Poll for a live device connection, defensively dismissing any unexpected
+    popup dialog that can appear after clicking "Retry Comm" - e.g. the
+    modal error box "AccuMate was not able to communicate with address N as
+    defined in Document Options. Please verify arm address settings in
+    Document Options and try again." (confirmed live against a previously-
+    untested device IP/arm-address combination).
+
+    Without this, such a dialog sits on top of the main window and querying
+    its UIA tree (via is_device_connected() -> find_ribbon_button() ->
+    descendants()) while the dialog is modal crashes the whole process with
+    a fatal COM exception (0x80040155) instead of failing gracefully. This
+    dismisses the dialog (so it can't keep blocking the UIA thread), logs
+    its message once for diagnostics, and keeps polling until either a live
+    connection is reported or `timeout` elapses.
+    """
+    start = time.time()
+    warned = set()
+
+    while time.time() - start < timeout:
+        dlg = wait_for_warning_dialog(app_obj, timeout=0.5)
+        if dlg is not None:
+            message = ""
+            try:
+                for ctrl in dlg.descendants(class_name="Static"):
+                    text = ctrl.window_text()
+                    if text:
+                        message = text
+                        break
+            except Exception:
+                pass
+
+            if message not in warned:
+                print(f"[WARN] Unexpected dialog during connection attempt: {message!r} - dismissing")
+                warned.add(message)
+
+            try:
+                dismiss_dialog(dlg)
+            except Exception as e:
+                print(f"[WARN] Failed to dismiss unexpected dialog: {e}")
+
+            time.sleep(0.5)
+            continue
+
+        try:
+            if app_obj.is_device_connected():
+                return True
+        except Exception as e:
+            print(f"[WARN] is_device_connected() check raised {e!r}, retrying")
+
+        time.sleep(1)
+
+    return False
 
