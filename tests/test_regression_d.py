@@ -199,7 +199,7 @@ def test_d6_uploading_driver_database_files(app_ftp, device_ip, tmp_path):
     # config file to unblock the comm/connect flow before uploading.
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -227,7 +227,7 @@ def test_d7_downloading_driver_database_files(app_ftp, device_ip, tmp_path):
     app = app_ftp
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 

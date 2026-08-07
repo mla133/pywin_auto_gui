@@ -148,13 +148,44 @@ def set_arm_address(dlg, arm_number, address):
         )
 
 
-def set_arm_addresses(dlg, addresses):
+def set_arm_address_raw(dlg, arm_number, address):
     """
-    Set Communications Addresses for arms 1..len(addresses) in one pass.
+    Like set_arm_address, but without the post-set readback assertion -
+    needed when deliberately setting an arm's address to 0 (meaning "this
+    arm isn't physically configured on this AccuLoad"), since AccuMate is
+    expected to reject/flag that value with a warning dialog rather than
+    simply accept and echo it back (see A9 / the "cannot be 0" warning).
+    """
+    control_id = _ARM_ADDRESS_CONTROL_IDS[arm_number]
+    ctrl = _find_by_control_id(dlg, control_id)
+    ctrl.click_input()
+    ctrl.type_keys("^a")  # select all
+    ctrl.type_keys(str(address))
+
+
+def set_arm_addresses(dlg, addresses, total_arms=6):
+    """
+    Set Communications Addresses for arms 1..len(addresses) to the given
+    values, then explicitly zero out any remaining arms up to `total_arms`
+    (AccuMate exposes 6 arm slots by default).
+
+    This matters for a physical AccuLoad that's only configured for some
+    arms, not the full 6: leaving an unused arm's address at whatever value
+    was previously in the document (e.g. a stale/default 2, 3, ...) makes
+    AccuMate try - and fail - to communicate with that address instead of
+    correctly treating the arm as absent. Explicitly zeroing it out is the
+    correct "not configured" signal, at the cost of triggering AccuMate's
+    own "Arm Address N cannot be 0" warning dialog(s), which the caller
+    (configure_ip_and_connect) dismisses afterward - that dialog is benign
+    and expected in this case, not a real error.
+
     `addresses` is a sequence of values applied in order (index 0 -> Arm 1).
     """
     for arm_number, address in enumerate(addresses, start=1):
         set_arm_address(dlg, arm_number, address)
+
+    for arm_number in range(len(addresses) + 1, total_arms + 1):
+        set_arm_address_raw(dlg, arm_number, 0)
 
 
 def close_communications_settings(dlg, accept=True):
@@ -236,7 +267,28 @@ def dismiss_dialog(dlg, prefer_text=("OK",)):
     raise RuntimeError(f"Could not find a button to dismiss dialog {dlg.window_text()!r}")
 
 
-def configure_ip_and_connect(app_obj, ip_address, timeout=15, arm_addresses=None):
+def _dismiss_pending_warnings(app_obj, max_dialogs=6, timeout=3):
+    """
+    Dismiss any warning dialog(s) already up or that appear within
+    `timeout` seconds (e.g. one "Arm Address N cannot be 0" per zeroed arm
+    triggered by set_arm_addresses' padding). Stops as soon as no new
+    dialog appears within `timeout`, or after `max_dialogs` dismissals as a
+    safety cap.
+    """
+    for _ in range(max_dialogs):
+        dlg = wait_for_warning_dialog(app_obj, timeout=timeout)
+        if dlg is None:
+            return
+        print(f"[INFO] Dismissing warning dialog: {dlg.window_text()!r}")
+        try:
+            dismiss_dialog(dlg)
+        except Exception as e:
+            print(f"[WARN] Failed to dismiss warning dialog: {e}")
+            return
+        time.sleep(0.5)
+
+
+def configure_ip_and_connect(app_obj, ip_address, timeout=45, arm_addresses=None):
     """
     Configure AccuMate's device IP address and attempt a live connection:
 
@@ -267,10 +319,74 @@ def configure_ip_and_connect(app_obj, ip_address, timeout=15, arm_addresses=None
     close_communications_settings(dlg, accept=True)
     time.sleep(0.5)
 
+    if arm_addresses is not None and len(arm_addresses) < 6:
+        # Explicitly zeroing out unconfigured arms (see set_arm_addresses)
+        # triggers AccuMate's own "Arm Address N cannot be 0" warning
+        # dialog(s), one per zeroed arm - benign/expected here since the
+        # physical AccuLoad genuinely isn't configured for those arms, not
+        # a real error. Dismiss them before proceeding.
+        _dismiss_pending_warnings(app_obj)
+
     print("[STEP] Clicking ribbon 'Retry Comm'")
     uia_win = app_obj.get_uia_window()
     click_ribbon_button(uia_win, "Retry Comm")
 
     print(f"[STEP] Waiting up to {timeout}s for AccuMate to report a live connection")
-    return app_obj.wait_for_device_connection(timeout=timeout)
+    return _wait_for_connection_dismissing_dialogs(app_obj, timeout=timeout)
+
+
+def _wait_for_connection_dismissing_dialogs(app_obj, timeout):
+    """
+    Poll for a live device connection, defensively dismissing any unexpected
+    popup dialog that can appear after clicking "Retry Comm" - e.g. the
+    modal error box "AccuMate was not able to communicate with address N as
+    defined in Document Options. Please verify arm address settings in
+    Document Options and try again." (confirmed live against a previously-
+    untested device IP/arm-address combination).
+
+    Without this, such a dialog sits on top of the main window and querying
+    its UIA tree (via is_device_connected() -> find_ribbon_button() ->
+    descendants()) while the dialog is modal crashes the whole process with
+    a fatal COM exception (0x80040155) instead of failing gracefully. This
+    dismisses the dialog (so it can't keep blocking the UIA thread), logs
+    its message once for diagnostics, and keeps polling until either a live
+    connection is reported or `timeout` elapses.
+    """
+    start = time.time()
+    warned = set()
+
+    while time.time() - start < timeout:
+        dlg = wait_for_warning_dialog(app_obj, timeout=0.5)
+        if dlg is not None:
+            message = ""
+            try:
+                for ctrl in dlg.descendants(class_name="Static"):
+                    text = ctrl.window_text()
+                    if text:
+                        message = text
+                        break
+            except Exception:
+                pass
+
+            if message not in warned:
+                print(f"[WARN] Unexpected dialog during connection attempt: {message!r} - dismissing")
+                warned.add(message)
+
+            try:
+                dismiss_dialog(dlg)
+            except Exception as e:
+                print(f"[WARN] Failed to dismiss unexpected dialog: {e}")
+
+            time.sleep(0.5)
+            continue
+
+        try:
+            if app_obj.is_device_connected():
+                return True
+        except Exception as e:
+            print(f"[WARN] is_device_connected() check raised {e!r}, retrying")
+
+        time.sleep(1)
+
+    return False
 

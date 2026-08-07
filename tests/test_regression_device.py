@@ -17,7 +17,7 @@ from workflows.terminal_emulator import (
 )
 from controls.ribbon_controls import click_ribbon_button, is_ribbon_button_enabled
 
-DEVICE_CONNECT_TIMEOUT = 15
+DEVICE_CONNECT_TIMEOUT = 45  # bumped from 15s: remote/VPN sessions add connect latency
 # PUSH/PULL transfer the full config to/from the device section by section
 # over the network and can legitimately take a while - live monitoring of a
 # real PUSH (blank/default config) clocked a full 0%->100% transfer at

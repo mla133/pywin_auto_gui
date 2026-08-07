@@ -139,7 +139,7 @@ def test_c4_uploading_translation_files(app_ftp, device_ip, tmp_path):
     # gotcha documented in test_regression_d.py's D6).
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -167,7 +167,7 @@ def test_c5_downloading_translation_files(app_ftp, device_ip, tmp_path):
     app = app_ftp
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 

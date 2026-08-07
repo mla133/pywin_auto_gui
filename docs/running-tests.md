@@ -92,6 +92,33 @@ Database, Equation Sets, Translations, Logs, License Status). Use the
 `Release/` build (`app` fixture) for everything else. If you add a new
 FTP-touching test, make sure it takes `app_ftp`, not `app`.
 
+## Generating a PDF regression report
+
+Pass `--pdf-report=<path>` to any pytest invocation to additionally write
+a single PDF summarizing that run — a top-level summary (pass/fail/skip/
+error counts, pass rate, a color-coded per-test status table) followed by
+a full per-test breakdown (docstring, markers, outcome, duration, failure
+text, and any screenshots captured for that test from
+`screenshots/<test_name>/`). This is **opt-in**: a plain `pytest -s -v`
+run never generates a PDF unless you pass the flag.
+
+```bash
+# Default regression pass, plus a PDF report of whatever actually ran
+pytest -s -v --pdf-report=reports/regression_$(date +%Y%m%d).pdf
+
+# Combine with marker filters/explicit paths - the report only covers
+# whatever subset of tests actually ran in that invocation
+pytest -s -v tests/test_regression_d.py -m "requires_device" -o addopts="" \
+    --accumate-device-ip=10.55.66.70 --pdf-report=reports/d_section_report.pdf
+```
+
+The report-generation code lives in `reporting/pdf_report.py` (built with
+`reportlab`) and is wired into the root `conftest.py`'s
+`pytest_runtest_makereport`/`pytest_sessionfinish` hooks. It's covered by
+its own fast, no-live-app unit tests in `tests/test_pdf_report.py`. The
+`reports/` output directory is not committed (see `.gitignore`) — it's a
+generated artifact, choose whatever path/filename makes sense per run.
+
 ## Running the non-`test_*.py` files
 
 `unit_test_ribbon_controls.py` and `unit_test_uia_inspection.py`

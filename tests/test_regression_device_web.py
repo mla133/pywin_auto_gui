@@ -13,7 +13,7 @@ from workflows.comm_workflows import (
 from workflows.totalizers import retrieve_totalizers
 from workflows.accuload_web import AccuLoadWebSession
 
-DEVICE_CONNECT_TIMEOUT = 15
+DEVICE_CONNECT_TIMEOUT = 45  # bumped from 15s: remote/VPN sessions add connect latency
 
 
 def _with_web_session_retry(device_ip, action, attempts=3, delay=5):

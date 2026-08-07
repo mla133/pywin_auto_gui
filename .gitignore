@@ -52,6 +52,7 @@ coverage.xml
 cover/
 screenshots/
 print_output/
+reports/
 *.html
 
 # Translations

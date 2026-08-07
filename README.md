@@ -224,6 +224,14 @@ pytest -s -v
   ```bash
   pytest -s -v tests/unit_test_ribbon_controls.py
   ```
+- Generate a PDF regression report (opt-in, off by default) summarizing
+  whatever subset of tests ran — pass/fail/skip counts up top, then a
+  full per-test breakdown with docstring/markers/duration/failure text
+  and any captured screenshots. See
+  ["Generating a PDF regression report"](docs/running-tests.md#generating-a-pdf-regression-report):
+  ```bash
+  pytest -s -v --pdf-report=reports/regression_report.pdf
+  ```
 
 ---
 

@@ -123,7 +123,7 @@ def test_e4_uploading_equation_files(app_ftp, device_ip, tmp_path):
     # gotcha documented in test_regression_d.py's D6).
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -153,7 +153,7 @@ def test_e5_downloading_equation_files(app_ftp, device_ip, tmp_path):
     app = app_ftp
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -254,7 +254,7 @@ def test_e8_uploading_empty_equation_file(app_ftp, device_ip, tmp_path):
     # Same "Document Options" enablement gotcha as E4 - see its comment.
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 

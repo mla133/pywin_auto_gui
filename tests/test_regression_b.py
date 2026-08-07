@@ -625,7 +625,7 @@ def test_b4_uploading_empty_report_file(app_ftp, device_ip, tmp_path):
     # above isn't enough (same gotcha confirmed live for D6/E4/E8).
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -652,7 +652,7 @@ def test_b5_uploading_report_files_transaction_report(app_ftp, device_ip, tmp_pa
 
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -675,7 +675,7 @@ def test_b6_downloading_report_files_transaction_report(app_ftp, device_ip, tmp_
     app = app_ftp
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -699,7 +699,7 @@ def test_b7_uploading_report_files_batch_report(app_ftp, device_ip, tmp_path):
 
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -715,7 +715,7 @@ def test_b8_downloading_report_files_batch_report(app_ftp, device_ip, tmp_path):
     app = app_ftp
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -739,7 +739,7 @@ def test_b9_uploading_report_files_prove_report(app_ftp, device_ip, tmp_path):
 
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -755,7 +755,7 @@ def test_b10_downloading_report_files_prove_report(app_ftp, device_ip, tmp_path)
     app = app_ftp
     load_test_file(app)
 
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
@@ -853,7 +853,7 @@ def test_b13_upload_download_multiple_times(app_ftp, device_ip, tmp_path):
         assert os.path.isfile(upload_path)
 
         load_test_file(app)
-        connected = configure_ip_and_connect(app, device_ip, timeout=15)
+        connected = configure_ip_and_connect(app, device_ip, timeout=45)
         if not connected:
             pytest.skip("AccuLoad device not reachable/connected")
 
@@ -874,8 +874,8 @@ def test_b13_upload_download_multiple_times(app_ftp, device_ip, tmp_path):
         # duplicate) re-activates the correct tab; reconnect only if that
         # still isn't enough.
         load_test_file(app)
-        if not app.wait_for_device_connection(timeout=15):
-            connected = configure_ip_and_connect(app, device_ip, timeout=15)
+        if not app.wait_for_device_connection(timeout=45):
+            connected = configure_ip_and_connect(app, device_ip, timeout=45)
             if not connected:
                 pytest.skip("AccuLoad device not reachable/connected before download")
 

@@ -139,7 +139,7 @@ def _connect_or_skip(app, device_ip):
     """
     new_config_file(app)
     load_test_file(app)
-    connected = configure_ip_and_connect(app, device_ip, timeout=15)
+    connected = configure_ip_and_connect(app, device_ip, timeout=45)
     if not connected:
         pytest.skip("AccuLoad device not reachable/connected")
 
