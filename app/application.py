@@ -1,9 +1,52 @@
+import os
+
 from pywinauto import Application
 import re
 import time
 
 APP_TITLE = "AccuMate for AccuLoad"
-APP_EXE = r"C:\\Users\\allenma\\SoftwareDevelopment\\acculoadiv.AccuMate\\Release\\AccuMate.exe"
+
+# Fallback, machine-specific absolute path - kept only as a last resort (see
+# _resolve_app_exe_path() below) for anyone running this repo standalone,
+# outside of an acculoadiv.AccuMate checkout, on this exact machine.
+_APP_EXE_FALLBACK = r"C:\\Users\\allenma\\SoftwareDevelopment\\acculoadiv.AccuMate\\Release\\AccuMate.exe"
+_APP_EXE_INSTALLED_FALLBACK = r"C:\\Users\\allenma\\AppData\\Local\\Guidant\\AccuMate\\1.12\\AccuMate.exe"
+
+
+def _resolve_app_exe_path(env_var, relative_candidate, fallback):
+    """
+    Resolve a real AccuMate.exe path with the following precedence, so this
+    repo works out of the box for any developer once embedded as the
+    `testing/automated` git submodule inside the acculoadiv.AccuMate
+    product repo (as well as for anyone still running it standalone):
+
+    1. The given environment variable, if set - an explicit override,
+       always wins regardless of what's on disk.
+    2. `relative_candidate` - a path computed relative to *this file's own
+       location*, only used if it actually exists on disk. When embedded
+       as `<product_repo>/testing/automated/`, this repo's root is 2
+       directories below the product repo root, so the real build output
+       lives at `../../Release/AccuMate.exe` relative to this repo's
+       root - see APP_EXE below. Deliberately inert (skipped) for anyone
+       running pywin_auto_gui standalone/not embedded, since the computed
+       path simply won't exist there.
+    3. `fallback` - today's hardcoded, machine-specific absolute path, for
+       backward compatibility on this exact machine/repo layout.
+    """
+    override = os.environ.get(env_var)
+    if override:
+        return override
+    if relative_candidate and os.path.isfile(relative_candidate):
+        return relative_candidate
+    return fallback
+
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_RELATIVE_APP_EXE = os.path.normpath(
+    os.path.join(_REPO_ROOT, "..", "..", "Release", "AccuMate.exe")
+)
+
+APP_EXE = _resolve_app_exe_path("ACCUMATE_EXE_PATH", _RELATIVE_APP_EXE, _APP_EXE_FALLBACK)
 
 # Live-confirmed (2026-08-05): a corporate network/firewall policy blocks
 # the actual FTP file-transfer data channel when AccuMate.exe is launched
@@ -20,7 +63,15 @@ APP_EXE = r"C:\\Users\\allenma\\SoftwareDevelopment\\acculoadiv.AccuMate\\Releas
 # binary itself. Use APP_EXE_INSTALLED (see AccuMateApp's exe_path param,
 # and conftest.py's `app_ftp` fixture) for any test that performs a real
 # upload/download; keep using the default APP_EXE for everything else.
-APP_EXE_INSTALLED = r"C:\\Users\\allenma\\AppData\\Local\\Guidant\\AccuMate\\1.12\\AccuMate.exe"
+#
+# Unlike APP_EXE, there's no sensible *relative* path to compute here - the
+# installed location depends on the installer/user profile, not on where
+# this repo happens to live - so only an explicit env var override
+# (ACCUMATE_EXE_INSTALLED_PATH) is supported on top of the hardcoded
+# fallback.
+APP_EXE_INSTALLED = _resolve_app_exe_path(
+    "ACCUMATE_EXE_INSTALLED_PATH", None, _APP_EXE_INSTALLED_FALLBACK
+)
 
 BACKEND = "win32"
 
