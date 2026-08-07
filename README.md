@@ -1,5 +1,12 @@
 # pywin_auto_gui
 
+> **⚠️ Archived / superseded.** This repository's code has been folded
+> directly into the `acculoadiv.AccuMate` product repo (Assembla) at
+> `testing/automated/`. That is now the source of truth — see
+> "⚠️ Repository status: archived / superseded" below for details. This
+> repo is left in place as a historical artifact and is not actively
+> maintained going forward.
+
 A Python-based UI automation test framework for **AccuMate for AccuLoad**, a
 Win32/MFC desktop application, built on **pywinauto** + **pytest**.
 
@@ -123,10 +130,9 @@ Tests drive the real AccuMate binary. The path is resolved by
 1. The `ACCUMATE_EXE_PATH` environment variable, if set — an explicit
    override.
 2. A path computed relative to this repo's own location, assuming it's
-   embedded as the `testing/automated` submodule inside an
-   `acculoadiv.AccuMate` checkout (`../../Release/AccuMate.exe`) — used
-   automatically only if that path exists on disk (see "Embedding in
-   acculoadiv.AccuMate" below).
+   embedded at `testing/automated/` inside an `acculoadiv.AccuMate`
+   checkout (`../../Release/AccuMate.exe`) — used automatically only if
+   that path exists on disk (see "⚠️ Repository status" below).
 3. A hardcoded, machine-specific fallback path, for backward compatibility
    running this repo standalone on the original dev machine.
 
@@ -141,48 +147,28 @@ somewhere else entirely.
 
 ---
 
-# 🔌 Embedding in acculoadiv.AccuMate
+# ⚠️ Repository status: archived / superseded
 
-This repo is designed to be embedded as a **git submodule** inside the
-`acculoadiv.AccuMate` product repo, as its GUI regression tester (alongside
-— and eventually replacing — that repo's legacy Python 2.7
-`testing\end-to-end\` suite).
+This standalone `github.com/mla133/pywin_auto_gui` repository is no
+longer the source of truth. Its code has been folded directly into the
+`acculoadiv.AccuMate` product repo (hosted on Assembla) at
+`testing/automated/`, as plain tracked files — there is **no longer a git
+submodule relationship** between the two repos, and no ongoing sync back
+to this GitHub repo is expected.
 
-## One-time setup (product repo side)
+**All further development on the GUI regression tester happens directly
+inside `acculoadiv.AccuMate`'s `testing/automated/` folder** — edit it in
+place there and commit normally, the same as any other part of that
+codebase. This repo is left here as a historical/dormant artifact; it is
+not deleted, but treat it as read-only going forward.
 
-```bash
-# Already done once per acculoadiv.AccuMate checkout; new clones just need:
-git submodule update --init --recursive
-```
-
-The submodule lives at `testing/automated/` in the product repo. From
-there, set up this repo's own environment as usual:
-
-```bash
-cd testing/automated
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-```
-
-## Running tests once embedded
-
-Run pytest from inside `testing/automated/` exactly as described in
-"Running Tests" below — no path configuration needed. `APP_EXE` will
-automatically resolve to `<acculoadiv.AccuMate>\Release\AccuMate.exe` via
-the relative-path logic described above, since the submodule's fixed
-location (`testing/automated/`, two directories below the product repo
-root) is exactly what that logic expects. Build AccuMate (`Release`
-config) first so the binary exists to automate.
-
-## Updating the submodule
-
-To pull in newer pywin_auto_gui changes once they're merged to `main`:
-
-```bash
-git submodule update --remote testing/automated
-git add testing/automated
-git commit -m "Update testing/automated submodule to latest main"
-```
+Run pytest from inside `testing/automated/` in the product repo exactly
+as described in "Running Tests" below — no path configuration needed.
+`APP_EXE` automatically resolves to
+`<acculoadiv.AccuMate>\Release\AccuMate.exe` via the relative-path logic
+described above, since `testing/automated/` (two directories below the
+product repo root) is exactly what that logic expects. Build AccuMate
+(`Release` config) first so the binary exists to automate.
 
 ---
 
