@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from app.application import AccuMateApp, APP_EXE_INSTALLED
 from workflows.accuload_web import AccuLoadWebSession
-from reporting.pdf_report import TestResult, build_pdf_report
+from reporting.pdf_report import StepResult, TestResult, build_pdf_report
 
 # Fallback AccuMate config used when --accumate-config-file isn't passed. This
 # is the app's own DefaultAL4.dat, installed alongside the executable (also
@@ -168,6 +168,9 @@ def pytest_runtest_makereport(item, call):
 
     test_name = item.name
     screenshot_dir = os.path.join("screenshots", test_name)
+    # Populated (if at all) by the record_step fixture during the test's
+    # own call phase - read now since call always runs before teardown.
+    steps = list(getattr(item, "_recorded_steps", []))
 
     existing = next((r for r in config._pdf_report_results if r.nodeid == item.nodeid), None)
     if existing is not None:
@@ -178,6 +181,8 @@ def pytest_runtest_makereport(item, call):
         existing.duration += report.duration
         if longrepr:
             existing.longrepr = longrepr
+        if steps:
+            existing.steps = steps
     else:
         config._pdf_report_results.append(TestResult(
             nodeid=item.nodeid,
@@ -188,6 +193,7 @@ def pytest_runtest_makereport(item, call):
             markers=markers,
             longrepr=longrepr,
             screenshot_dir=screenshot_dir,
+            steps=steps,
         ))
 
 
@@ -251,6 +257,84 @@ def accuload_web(device_ip):
     """
     with AccuLoadWebSession(device_ip=device_ip) as web:
         yield web
+
+
+def _capture_step_screenshot(app_instance, test_name, step_number):
+    """
+    Captures one screenshot for a record_step() call, saved alongside
+    the test's other auto_step screenshots under screenshots/<test_name>/
+    so all of a test's captures live in one place. Returns None (rather
+    than raising) on failure, matching the same
+    swallow-and-warn-don't-fail-the-test pattern used by
+    MainPage._auto_screenshot/_teardown_app - a screenshot failure should
+    never mask the real step verdict being recorded.
+    """
+    try:
+        win = app_instance.get_window()
+
+        test_dir = os.path.join("screenshots", test_name)
+        os.makedirs(test_dir, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"step{step_number:02d}_{timestamp}.png"
+        path = os.path.join(test_dir, filename)
+
+        win.capture_as_image().save(path)
+        print(f"[INFO] Step {step_number} screenshot saved: {path}")
+        return path
+    except Exception as e:
+        print(f"[WARN] Step {step_number} screenshot failed: {e}")
+        return None
+
+
+@pytest.fixture
+def record_step(request):
+    """
+    Gives a test an explicit, lightweight way to record a PASS/FAIL/SKIP
+    verdict for one of its docstring's numbered steps, so the PDF report
+    can show each step being evaluated instead of just one overall test
+    outcome - and, for verification steps, a screenshot proving what was
+    actually seen at that point.
+
+    Usage inside a test (step numbers should match the docstring's own
+    numbering, e.g. a docstring listing "11. Verify AccuLoad is updating
+    the file..."):
+
+        def test_a4_loading_old_al4_config_files(app, record_step):
+            '''
+            ...
+              11. Verify AccuLoad is updating the file (progress dialog).
+            '''
+            ...
+            notice_shown = wait_for_migration_notice(app)
+            record_step(11, "passed" if notice_shown else "failed",
+                        app=app, note="Migration notice text", screenshot=True)
+
+    Pass `app=<the test's app fixture value>` and `screenshot=True` to
+    capture a screenshot at that point (saved under
+    screenshots/<test_name>/ alongside the test's other captures) -
+    recommended for any step that verifies/confirms UI state, since a
+    screenshot is the actual evidence for that verdict. Steps recorded
+    this way are picked up by pytest_runtest_makereport below and
+    attached to the TestResult passed to build_pdf_report(); docstring
+    steps with no matching recorded step number render exactly as
+    before (plain, unannotated) - this is purely additive/opt-in.
+    """
+    steps = []
+    request.node._recorded_steps = steps
+
+    def _record(step_number, outcome="passed", note="", app=None, screenshot=False):
+        screenshot_path = None
+        if screenshot and app is not None:
+            screenshot_path = _capture_step_screenshot(app, request.node.name, step_number)
+        steps.append(StepResult(
+            step_number=step_number,
+            outcome=outcome,
+            note=note,
+            screenshot_path=screenshot_path,
+        ))
+
+    return _record
 
 
 def _teardown_app(app_instance, test_name):

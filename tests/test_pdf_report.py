@@ -13,7 +13,7 @@ import os
 from PIL import Image as PILImage
 from pypdf import PdfReader
 
-from reporting.pdf_report import TestResult, build_pdf_report
+from reporting.pdf_report import StepResult, TestResult, build_pdf_report
 
 
 def _make_fixture_screenshot(path):
@@ -133,3 +133,51 @@ def test_build_pdf_report_empty_results(tmp_path):
     assert os.path.isfile(output_path)
     with open(output_path, "rb") as pdf_file:
         assert pdf_file.read(5) == b"%PDF-"
+
+
+def test_build_pdf_report_renders_step_verdicts_and_screenshots(tmp_path):
+    """
+    A docstring's numbered steps that have a matching StepResult (by
+    step_number) should render with a PASS/FAIL/SKIP badge and, when a
+    screenshot_path is provided, embed that screenshot right after the
+    step - while a step with no matching StepResult (step 3 here) still
+    renders plain/unannotated, same as before this feature existed.
+    """
+    step_screenshot = str(tmp_path / "step_screenshots" / "step01.png")
+    _make_fixture_screenshot(step_screenshot)
+
+    results = [
+        TestResult(
+            nodeid="tests/test_example.py::test_with_steps",
+            name="test_with_steps",
+            outcome="failed",
+            duration=3.0,
+            docstring="""
+            Example test with per-step verdicts.
+              1. Open a saved file.
+              2. Verify the file loaded correctly.
+              3. Close the file (not explicitly recorded).
+            """,
+            steps=[
+                StepResult(step_number=1, outcome="passed", note="File opened cleanly",
+                           screenshot_path=step_screenshot),
+                StepResult(step_number=2, outcome="failed", note="Expected value missing"),
+            ],
+        ),
+    ]
+
+    output_path = str(tmp_path / "report_with_steps.pdf")
+    build_pdf_report(results, output_path)
+
+    assert os.path.isfile(output_path)
+    reader = PdfReader(output_path)
+    detail_text = reader.pages[1].extract_text()
+    assert "PASS" in detail_text
+    assert "FAIL" in detail_text
+    assert "File opened cleanly" in detail_text
+    assert "Expected value missing" in detail_text
+    # Step 3 has no recorded StepResult - it should still appear plainly.
+    assert "Close the file" in detail_text
+    # Two detail pages: one for the step-1 embedded screenshot, one more
+    # for the wrap-up (page count grows vs. a docstring-only report).
+    assert len(reader.pages) >= 2

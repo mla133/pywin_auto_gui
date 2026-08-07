@@ -45,10 +45,43 @@ _OUTCOME_COLORS = {
 }
 _DEFAULT_OUTCOME_COLOR = colors.HexColor("#d9d9d9")
 
+# Inline text colors (as opposed to the table-cell background colors
+# above) used for the "[PASS]"/"[FAIL]"/"[SKIP]" badge appended to a
+# numbered docstring step when a matching StepResult was recorded.
+_STEP_BADGE_COLORS = {
+    "passed": "#2e7d32",
+    "failed": "#c62828",
+    "skipped": "#b8860b",
+}
+_STEP_BADGE_LABELS = {
+    "passed": "PASS",
+    "failed": "FAIL",
+    "skipped": "SKIP",
+}
+
 # Max width/height a screenshot is scaled down to (in inches) so it fits
 # comfortably on a US Letter page alongside its caption/heading.
 _SCREENSHOT_MAX_WIDTH_IN = 6.5
 _SCREENSHOT_MAX_HEIGHT_IN = 4.5
+
+
+@dataclass
+class StepResult:
+    """
+    One explicitly-recorded numbered-step verdict within a test, captured
+    via the `record_step` fixture (see conftest.py) so the PDF report can
+    show PASS/FAIL/SKIP per docstring step instead of only one overall
+    test outcome. Matched to a docstring's numbered list item by
+    `step_number` (e.g. step_number=11 matches a docstring line starting
+    "11. ..."). Optional and additive - docstrings/tests that don't use
+    `record_step` render exactly as before (plain, unannotated list).
+    """
+    __test__ = False
+
+    step_number: int
+    outcome: str = "passed"  # "passed" | "failed" | "skipped"
+    note: str = ""
+    screenshot_path: str = None
 
 
 @dataclass
@@ -70,6 +103,7 @@ class TestResult:
     markers: list = field(default_factory=list)
     longrepr: str = ""
     screenshot_dir: str = None
+    steps: list = field(default_factory=list)  # list[StepResult], see above
 
 
 def _find_screenshots(screenshot_dir):
@@ -115,6 +149,13 @@ def _build_styles():
         # step text rather than back under the number.
         name="DocstringStep", parent=styles["Docstring"], leftIndent=16,
         firstLineIndent=-16, spaceAfter=3,
+    ))
+    styles.add(ParagraphStyle(
+        # An optional note attached to a record_step() verdict, shown
+        # indented under its step line (e.g. "Migration notice text did
+        # not match expected wording").
+        name="DocstringStepNote", parent=styles["Docstring"], fontSize=8,
+        leftIndent=28, spaceAfter=4, textColor=colors.grey,
     ))
     styles.add(ParagraphStyle(
         # Used for table cells that may contain long, unbroken strings
@@ -200,9 +241,41 @@ def _summary_flowables(results, run_started, run_finished, styles):
 
 
 _NUMBERED_STEP_RE = re.compile(r"^\d+[\.\)]\s+")
+_STEP_NUMBER_PREFIX_RE = re.compile(r"^(\d+)[\.\)]\s+")
 
 
-def _docstring_flowables(docstring, styles):
+def _screenshot_flowables(screenshot_path, styles, caption=None):
+    """
+    Returns flowables (caption Paragraph + scaled Image) embedding one
+    screenshot, or a short italic error note if the file can't be loaded
+    (e.g. a corrupt/partial PNG) - shared by both the test-level
+    "Screenshots" section and per-step screenshots in the docstring list,
+    so both places scale/caption images identically.
+    """
+    try:
+        img = Image(screenshot_path)
+        # Scale to fit within the max box while preserving aspect ratio -
+        # reportlab's Image doesn't do this automatically.
+        scale = min(
+            (_SCREENSHOT_MAX_WIDTH_IN * inch) / img.imageWidth,
+            (_SCREENSHOT_MAX_HEIGHT_IN * inch) / img.imageHeight,
+            1.0,
+        )
+        img.drawWidth = img.imageWidth * scale
+        img.drawHeight = img.imageHeight * scale
+        return [
+            Paragraph(caption or os.path.basename(screenshot_path), styles["Italic"]),
+            img,
+            Spacer(1, 0.1 * inch),
+        ]
+    except Exception as exc:  # pragma: no cover - defensive, a corrupt PNG shouldn't kill the whole report
+        return [Paragraph(
+            f"(could not embed screenshot {os.path.basename(screenshot_path)}: {exc})",
+            styles["Italic"],
+        )]
+
+
+def _docstring_flowables(docstring, styles, steps=None):
     """
     Renders a test's docstring as one or more flowables instead of a
     single run-on paragraph, so multi-paragraph text and numbered step
@@ -218,7 +291,18 @@ def _docstring_flowables(docstring, styles):
     paragraphs (hanging indent, so wrapped continuations still line up
     under the step text); any other block is rendered as a single plain
     "Docstring" paragraph, same as before.
+
+    `steps` (optional list[StepResult]) lets a test explicitly record a
+    PASS/FAIL/SKIP verdict (and optional screenshot/note) for one of its
+    numbered steps via the `record_step` fixture (see conftest.py). Each
+    numbered item whose leading number matches a StepResult.step_number
+    gets a colored "[PASS]"/"[FAIL]"/"[SKIP]" badge appended, an optional
+    note paragraph, and its recorded screenshot embedded right below it -
+    steps with no matching StepResult render exactly as before (plain,
+    unannotated).
     """
+    steps_by_number = {s.step_number: s for s in (steps or [])}
+
     raw_lines = docstring.strip().splitlines()
     # Dedent: strip only the common leading whitespace pytest docstrings
     # pick up from source indentation, not intentional list indent.
@@ -251,7 +335,29 @@ def _docstring_flowables(docstring, styles):
         is_numbered_list = any(_NUMBERED_STEP_RE.match(item) for item in items)
         if is_numbered_list:
             for item in items:
-                flowables.append(Paragraph(item, styles["DocstringStep"]))
+                step_result = None
+                match = _STEP_NUMBER_PREFIX_RE.match(item)
+                if match:
+                    step_result = steps_by_number.get(int(match.group(1)))
+
+                if step_result is None:
+                    flowables.append(Paragraph(item, styles["DocstringStep"]))
+                    continue
+
+                badge_color = _STEP_BADGE_COLORS.get(step_result.outcome, "#666666")
+                badge_label = _STEP_BADGE_LABELS.get(step_result.outcome, step_result.outcome.upper())
+                flowables.append(Paragraph(
+                    f'{item}  <font color="{badge_color}"><b>[{badge_label}]</b></font>',
+                    styles["DocstringStep"],
+                ))
+                if step_result.note:
+                    flowables.append(Paragraph(f"<i>{step_result.note}</i>", styles["DocstringStepNote"]))
+                if step_result.screenshot_path and os.path.isfile(step_result.screenshot_path):
+                    flowables.extend(_screenshot_flowables(
+                        step_result.screenshot_path, styles,
+                        caption=f"Step {step_result.step_number} screenshot: "
+                                f"{os.path.basename(step_result.screenshot_path)}",
+                    ))
         else:
             flowables.append(Paragraph(" ".join(items), styles["Docstring"]))
 
@@ -290,8 +396,10 @@ def _detail_flowables_for_result(result, styles):
         # Docstrings can be long/multi-paragraph free text with numbered
         # step lists (see e.g. tests/test_regression_f.py) - render each
         # paragraph/step as its own flowable so lists stay readable
-        # instead of collapsing into one dense run-on paragraph.
-        flowables.extend(_docstring_flowables(result.docstring, styles))
+        # instead of collapsing into one dense run-on paragraph. Any
+        # steps explicitly recorded via record_step() get a PASS/FAIL/SKIP
+        # badge (and optional screenshot) inline with their list item.
+        flowables.extend(_docstring_flowables(result.docstring, styles, steps=result.steps))
 
     if result.outcome in ("failed", "error") and result.longrepr:
         flowables.append(Paragraph("<b>Failure Detail</b>", styles["BodyText"]))
@@ -302,25 +410,7 @@ def _detail_flowables_for_result(result, styles):
     if screenshots:
         flowables.append(Paragraph(f"<b>Screenshots ({len(screenshots)})</b>", styles["BodyText"]))
         for screenshot_path in screenshots:
-            try:
-                img = Image(screenshot_path)
-                # Scale to fit within the max box while preserving aspect
-                # ratio - reportlab's Image doesn't do this automatically.
-                scale = min(
-                    (_SCREENSHOT_MAX_WIDTH_IN * inch) / img.imageWidth,
-                    (_SCREENSHOT_MAX_HEIGHT_IN * inch) / img.imageHeight,
-                    1.0,
-                )
-                img.drawWidth = img.imageWidth * scale
-                img.drawHeight = img.imageHeight * scale
-                flowables.append(Paragraph(os.path.basename(screenshot_path), styles["Italic"]))
-                flowables.append(img)
-                flowables.append(Spacer(1, 0.1 * inch))
-            except Exception as exc:  # pragma: no cover - defensive, a corrupt PNG shouldn't kill the whole report
-                flowables.append(Paragraph(
-                    f"(could not embed screenshot {os.path.basename(screenshot_path)}: {exc})",
-                    styles["Italic"],
-                ))
+            flowables.extend(_screenshot_flowables(screenshot_path, styles))
     else:
         flowables.append(Paragraph("<i>No screenshots captured for this test.</i>", styles["BodyText"]))
 

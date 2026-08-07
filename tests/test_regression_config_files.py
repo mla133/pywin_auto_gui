@@ -187,7 +187,7 @@ def test_a3_loading_current_al4_config_file(app, config_file):
     )
 
 
-def test_a4_loading_old_al4_config_files(app):
+def test_a4_loading_old_al4_config_files(app, record_step):
     """
     regression.md A4: Loading Old AL4 Config Files.
 
@@ -214,7 +214,18 @@ def test_a4_loading_old_al4_config_files(app):
         pytest.skip(f"Old-format A4 config file not found: {A4_OLD_AL4_FILE}")
 
     print(f"[STEP] Loading old-format config file: {A4_OLD_AL4_FILE}")
-    migrated_path = load_and_migrate_old_config_file(app, A4_OLD_AL4_FILE)
+    try:
+        migrated_path = load_and_migrate_old_config_file(app, A4_OLD_AL4_FILE)
+    except Exception as exc:
+        record_step(10, "failed", app=app, screenshot=True, note=f"Open/migration did not complete: {exc}")
+        record_step(11, "skipped", note="Not reached - step 10 failed")
+        record_step(12, "skipped", note="Not reached - step 10 failed")
+        record_step(13, "skipped", note="Out of scope - not verified by this test")
+        raise
+    else:
+        record_step(10, "passed", app=app, note="Old-format file opened without error")
+        record_step(11, "passed", app=app, screenshot=True,
+                    note=f"Migration completed: {os.path.basename(migrated_path)}")
 
     try:
         assert os.path.isfile(migrated_path), (
@@ -233,6 +244,14 @@ def test_a4_loading_old_al4_config_files(app):
             assert expected_root in roots, (
                 f"Migrated config file is missing expected '{expected_root}' - possible data loss: {roots}"
             )
+    except Exception as exc:
+        record_step(12, "failed", app=app, screenshot=True, note=f"Migrated config verification failed: {exc}")
+        record_step(13, "skipped", note="Out of scope - not verified by this test")
+        raise
+    else:
+        record_step(12, "passed", app=app, screenshot=True, note=f"Directory tree intact: {roots}")
+        record_step(13, "skipped",
+                    note="Out of scope - the provided file's baked-in IP/Comm values weren't set by this test")
     finally:
         if os.path.isfile(migrated_path):
             os.remove(migrated_path)
