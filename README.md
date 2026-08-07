@@ -117,9 +117,72 @@ pip install pywinauto pytest Pillow pythoncom pywin32
 
 ## Target application
 
-Tests drive the real AccuMate binary — the path is hardcoded in
-`app/application.py`'s `APP_EXE` constant. Update that constant (or pass
-`AccuMateApp(exe_path=...)`) if your build lives elsewhere.
+Tests drive the real AccuMate binary. The path is resolved by
+`app/application.py`'s `_resolve_app_exe_path()` helper, in this order:
+
+1. The `ACCUMATE_EXE_PATH` environment variable, if set — an explicit
+   override.
+2. A path computed relative to this repo's own location, assuming it's
+   embedded as the `testing/automated` submodule inside an
+   `acculoadiv.AccuMate` checkout (`../../Release/AccuMate.exe`) — used
+   automatically only if that path exists on disk (see "Embedding in
+   acculoadiv.AccuMate" below).
+3. A hardcoded, machine-specific fallback path, for backward compatibility
+   running this repo standalone on the original dev machine.
+
+`APP_EXE_INSTALLED` (used by FTP-affected tests — see `conftest.py`'s
+`app_ftp` fixture) follows the same precedence but only supports the env
+var override (`ACCUMATE_EXE_INSTALLED_PATH`) plus the hardcoded fallback,
+since an *installed* location has no sensible path relative to this repo.
+
+Update the fallback constants in `app/application.py`, set the env var
+override, or pass `AccuMateApp(exe_path=...)` directly if your build lives
+somewhere else entirely.
+
+---
+
+# 🔌 Embedding in acculoadiv.AccuMate
+
+This repo is designed to be embedded as a **git submodule** inside the
+`acculoadiv.AccuMate` product repo, as its GUI regression tester (alongside
+— and eventually replacing — that repo's legacy Python 2.7
+`testing\end-to-end\` suite).
+
+## One-time setup (product repo side)
+
+```bash
+# Already done once per acculoadiv.AccuMate checkout; new clones just need:
+git submodule update --init --recursive
+```
+
+The submodule lives at `testing/automated/` in the product repo. From
+there, set up this repo's own environment as usual:
+
+```bash
+cd testing/automated
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+```
+
+## Running tests once embedded
+
+Run pytest from inside `testing/automated/` exactly as described in
+"Running Tests" below — no path configuration needed. `APP_EXE` will
+automatically resolve to `<acculoadiv.AccuMate>\Release\AccuMate.exe` via
+the relative-path logic described above, since the submodule's fixed
+location (`testing/automated/`, two directories below the product repo
+root) is exactly what that logic expects. Build AccuMate (`Release`
+config) first so the binary exists to automate.
+
+## Updating the submodule
+
+To pull in newer pywin_auto_gui changes once they're merged to `main`:
+
+```bash
+git submodule update --remote testing/automated
+git add testing/automated
+git commit -m "Update testing/automated submodule to latest main"
+```
 
 ---
 
